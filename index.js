@@ -299,12 +299,13 @@ async function issueContract(i, type) {
     parties,
   });
 
-  const pings = parties.map((p) => `<@${p.user_id}>`).join(" ");
+  const uniqueIds = [...new Set(parties.map((p) => p.user_id))];
+  const pings = uniqueIds.map((id) => `<@${id}>`).join(" ");
   const message = await i.editReply({
     content: `${pings} — please review and **Sign** the agreement below.`,
     embeds: [contractEmbed(contract)],
     components: [contractButtons(contract)],
-    allowedMentions: { users: parties.map((p) => p.user_id) },
+    allowedMentions: { users: uniqueIds },
   });
   contract.message_id = message.id;
   store.saveContract();
@@ -316,15 +317,17 @@ async function signContract(i) {
   if (!contract || contract.status !== "pending") {
     return i.reply({ content: "This contract isn't open for signing.", ephemeral: true });
   }
-  const party = contract.parties.find((p) => p.user_id === i.user.id);
-  if (!party) {
+  const myParties = contract.parties.filter((p) => p.user_id === i.user.id);
+  if (!myParties.length) {
     return i.reply({ content: "You're not a party to this contract.", ephemeral: true });
   }
-  if (party.signed_at) {
+  const unsigned = myParties.filter((p) => !p.signed_at);
+  if (!unsigned.length) {
     return i.reply({ content: "You've already signed this one.", ephemeral: true });
   }
 
-  party.signed_at = Date.now();
+  const now = Date.now();
+  unsigned.forEach((p) => (p.signed_at = now)); // sign all roles this person holds
   if (allSigned(contract)) contract.status = "signed";
   store.saveContract();
 
