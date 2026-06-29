@@ -24,6 +24,7 @@ import {
   closeButton,
   verifyConfirmButton,
   listingEmbed,
+  helpEmbed,
 } from "./embeds.js";
 import {
   contractEmbed,
@@ -126,11 +127,16 @@ const listCmd = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("description").setDescription("Details, features, location").setRequired(false))
   .addAttachmentOption((o) => o.setName("image").setDescription("A picture of the plot").setRequired(false));
 
+const helpCmd = new SlashCommandBuilder()
+  .setName("help")
+  .setDescription("How to use the Revolution Realty bot");
+
 const SLASH_COMMANDS = [
   sellerCmd.toJSON(),
   purchaseCmd.toJSON(),
   completeDealCmd.toJSON(),
   listCmd.toJSON(),
+  helpCmd.toJSON(),
 ];
 
 async function registerCommands(guild) {
@@ -162,6 +168,12 @@ client.on(Events.InteractionCreate, async (i) => {
       if (i.commandName === "purchase-agreement") return issueContract(i, "purchase");
       if (i.commandName === "complete-deal") return completeDeal(i);
       if (i.commandName === "list") return handleList(i);
+      if (i.commandName === "help") {
+        return i.reply({
+          embeds: [helpEmbed(isStaff(i.member, i.guild.id), verifyEnabled())],
+          ephemeral: true,
+        });
+      }
       return;
     }
     if (i.isButton()) {

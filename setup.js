@@ -144,6 +144,20 @@ export async function ensureGuildSetup(guild, client) {
     );
     cfg.listingsCategoryId = listCatId;
     cfg.listingForums = {};
+
+    // Members can browse + comment, but only the bot/staff can create listings.
+    const P = PermissionFlagsBits;
+    const listingOverwrites = [
+      {
+        id: guild.roles.everyone.id,
+        allow: [V, R, P.SendMessagesInThreads],
+        deny: [P.SendMessages, P.CreatePublicThreads, P.CreatePrivateThreads],
+      },
+      { id: client.user.id, allow: [V, R, S, P.CreatePublicThreads, P.SendMessagesInThreads, P.ManageThreads] },
+      ...(cfg.managerRoleId ? [{ id: cfg.managerRoleId, allow: [V, R, S, P.CreatePublicThreads, P.SendMessagesInThreads, P.ManageThreads] }] : []),
+      ...(cfg.realtorRoleId ? [{ id: cfg.realtorRoleId, allow: [V, R, S, P.CreatePublicThreads, P.SendMessagesInThreads] }] : []),
+    ];
+
     for (const cat of config.listingCategories) {
       let channelId = null;
       let kind = "forum";
@@ -155,6 +169,7 @@ export async function ensureGuildSetup(guild, client) {
           parent: listCatId || null,
           topic: `${cat} plot listings — posted by Revolution Realty`,
           availableTags: config.listingTags.map((t) => ({ name: t })),
+          permissionOverwrites: listingOverwrites,
         });
         channelId = f.id;
         for (const t of f.availableTags) tags[t.name] = t.id;
@@ -167,6 +182,7 @@ export async function ensureGuildSetup(guild, client) {
             type: ChannelType.GuildText,
             parent: listCatId || null,
             topic: `${cat} plot listings`,
+            permissionOverwrites: listingOverwrites,
           })
         );
         kind = "text";

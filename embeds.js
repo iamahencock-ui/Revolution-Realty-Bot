@@ -52,6 +52,39 @@ export function closeButton() {
   );
 }
 
+// --- Help -------------------------------------------------------------------
+export function helpEmbed(isStaff, verifyOn) {
+  const e = new EmbedBuilder()
+    .setColor(config.brandColor)
+    .setTitle(`${config.brandName} — Help`)
+    .setDescription("Your one-stop shop for buying, selling, and renting plots.");
+
+  const client = [
+    "• Open a ticket from the **Client Desk** — **Buy a plot** or **Sell a plot** — and a realtor will assist you.",
+    "• Browse current listings in the **Residential / Commercial / Skyscraper / Industrial** forums.",
+  ];
+  if (verifyOn) {
+    client.push("• Verify your Minecraft account in the **verify** channel to unlock the Client Desk.");
+  }
+  e.addFields({ name: "🏠 For clients", value: client.join("\n") });
+
+  if (isStaff) {
+    e.addFields({
+      name: "💼 For realtors & managers",
+      value: [
+        "`/seller-agreement` — issue an exclusive listing agreement",
+        "`/purchase-agreement` — issue a purchase agreement",
+        "`/complete-deal contract:<id>` — confirm transfer → release escrow + commission",
+        "`/list` — post a plot listing to a category forum",
+        "`!contracts` / `!contract <id>` — look up past contracts",
+        "`!close` — close a ticket",
+        "`!setup` / `!resetup` — (admin) post the panel / re-provision",
+      ].join("\n"),
+    });
+  }
+  return e;
+}
+
 // --- Listings ---------------------------------------------------------------
 export function listingEmbed(listing) {
   const e = new EmbedBuilder()
