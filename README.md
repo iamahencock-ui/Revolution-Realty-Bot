@@ -40,6 +40,12 @@ weekly** panel: every week the bot pings the tenant with a fresh memo for that
 week's rent, until the lease term ends. Each week's payment is verified
 independently. (Requires `DC_API_TOKEN` + `VERIFY_ACCOUNT_ID`.)
 
+**Rent escrow:** when a weekly rent is verified, the bot automatically splits it
+— the **landlord** receives `rent − commission`, the **realtor** their share of
+the commission (default 50%), and the **company** keeps the rest. Idempotent per
+week (no double-payouts). Toggle with `config.deal.rentEscrow`. (Sales still
+release via `/complete-deal` after the plot is transferred.)
+
 ## Listings (Milestone 6)
 
 First-run setup creates a **Listings** category with a **forum channel per

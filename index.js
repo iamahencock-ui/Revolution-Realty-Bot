@@ -532,6 +532,12 @@ async function handlePayCheck(i) {
     await i.channel
       .send(`✅ <@${payer.user_id}> paid Week ${c.rent_week} rent (${money(amount)}).`)
       .catch(() => {});
+
+    // Escrow: split this week's rent — landlord gets (rent - commission),
+    // realtor gets their commission share, company keeps the rest.
+    if (config.deal.rentEscrow && (c.last_paid_out_week || 0) < c.rent_week) {
+      await releaseRent(c, amount, i.channel);
+    }
   } else {
     c.payment_received = true;
     store.saveContract();
@@ -544,6 +550,49 @@ async function handlePayCheck(i) {
       )
       .catch(() => {});
   }
+}
+
+// Split a verified weekly rent payment: pay landlord + realtor, company keeps rest.
+async function releaseRent(c, rent, channel) {
+  const commission = commissionAmount(rent, c.fields.commission);
+  const landlordProceeds = Math.max(0, rent - commission);
+  const realtorCut = commission * config.deal.realtorCommissionShare;
+  const companyCut = commission - realtorCut;
+  const week = c.rent_week;
+
+  const r1 = await payToPlayer(
+    c.fields.landlord_ign,
+    landlordProceeds,
+    `Rent Week ${week} — lease #${c.id}`
+  );
+  let r2 = { ok: true, skipped: true };
+  if (realtorCut > 0) {
+    r2 = await payToPlayer(
+      c.fields.realtor_ign,
+      realtorCut,
+      `Rent commission Week ${week} — lease #${c.id}`
+    );
+  }
+  if (r1.ok) {
+    c.last_paid_out_week = week;
+    store.saveContract();
+  }
+
+  const lines = [`💸 **Week ${week} rent split:**`];
+  lines.push(
+    r1.ok
+      ? `• Landlord (${c.fields.landlord_ign}): ${money(landlordProceeds)} ✅`
+      : `• Landlord (${c.fields.landlord_ign}): ${money(landlordProceeds)} ❌ \`${r1.error}\``
+  );
+  if (!r2.skipped) {
+    lines.push(
+      r2.ok
+        ? `• Realtor (${c.fields.realtor_ign}): ${money(realtorCut)} ✅`
+        : `• Realtor (${c.fields.realtor_ign}): ${money(realtorCut)} ❌ \`${r2.error}\``
+    );
+  }
+  lines.push(`• Company keeps: ${money(companyCut)} (stays in firm account)`);
+  await channel.send(lines.join("\n")).catch(() => {});
 }
 
 // Weekly recurring rent reminders.

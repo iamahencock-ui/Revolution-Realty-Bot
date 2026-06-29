@@ -61,8 +61,10 @@ export const config = {
   // company keeps the remainder in the firm account.
   deal: {
     realtorCommissionShare: 0.5, // realtor's fraction of the commission (rest = company)
-    // The command the BUYER runs to pay the firm. {firm}/{amount}/{memo} filled in.
+    // The command the BUYER/TENANT runs to pay the firm. {firm}/{amount}/{memo} filled in.
     payCommandTemplate: "/pay-account business {firm} {amount} {memo}",
+    // Auto-pay the landlord (rent - commission) each time a weekly rent is verified.
+    rentEscrow: true,
   },
 
   // Shown at the top of each new ticket.
