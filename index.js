@@ -214,9 +214,41 @@ const panelCmd = new SlashCommandBuilder()
   .setName("panel")
   .setDescription("Open your realtor/manager control panel");
 
+const getPayCmd = new SlashCommandBuilder()
+  .setName("pay")
+  .setDescription("Get your pay command for a deal or rent again")
+  .addIntegerOption((o) => o.setName("contract").setDescription("Contract # (optional if used in your ticket)").setRequired(false));
+
 const helpCmd = new SlashCommandBuilder()
   .setName("help")
   .setDescription("How to use the Revolution Realty bot");
+
+const setupCmd = new SlashCommandBuilder()
+  .setName("setup")
+  .setDescription("Post the client panel here (admin)");
+
+const resetupCmd = new SlashCommandBuilder()
+  .setName("resetup")
+  .setDescription("Re-run first-time setup — recreates roles/channels (admin)");
+
+const closeCmd = new SlashCommandBuilder()
+  .setName("close")
+  .setDescription("Close this ticket");
+
+const contractsCmd = new SlashCommandBuilder()
+  .setName("contracts")
+  .setDescription("Look up past contracts (staff)")
+  .addUserOption((o) => o.setName("user").setDescription("Filter to a party").setRequired(false))
+  .addStringOption((o) =>
+    o.setName("status").setDescription("Filter by status").setRequired(false)
+      .addChoices({ name: "pending", value: "pending" }, { name: "signed", value: "signed" }, { name: "void", value: "void" })
+  )
+  .addStringOption((o) => o.setName("search").setDescription("Search plot / name / price").setRequired(false));
+
+const contractShowCmd = new SlashCommandBuilder()
+  .setName("contract")
+  .setDescription("Re-show a contract and re-pull its PDF (staff)")
+  .addIntegerOption((o) => o.setName("id").setDescription("Contract #").setRequired(true));
 
 const SLASH_COMMANDS = [
   sellerCmd.toJSON(),
@@ -226,7 +258,13 @@ const SLASH_COMMANDS = [
   listCmd.toJSON(),
   contractorAdCmd.toJSON(),
   panelCmd.toJSON(),
+  getPayCmd.toJSON(),
   helpCmd.toJSON(),
+  setupCmd.toJSON(),
+  resetupCmd.toJSON(),
+  closeCmd.toJSON(),
+  contractsCmd.toJSON(),
+  contractShowCmd.toJSON(),
 ];
 
 async function registerCommands(guild) {
@@ -264,6 +302,12 @@ client.on(Events.InteractionCreate, async (i) => {
       else if (i.commandName === "list") await handleList(i);
       else if (i.commandName === "contractor-ad") await handleContractorAd(i);
       else if (i.commandName === "panel") await handlePanel(i);
+      else if (i.commandName === "pay") await handlePayCommand(i);
+      else if (i.commandName === "setup") await handleSetupCmd(i);
+      else if (i.commandName === "resetup") await handleResetupCmd(i);
+      else if (i.commandName === "close") await handleCloseCmd(i);
+      else if (i.commandName === "contracts") await handleContractsCmd(i);
+      else if (i.commandName === "contract") await handleContractCmd(i);
       else if (i.commandName === "help") {
         await i.reply({
           embeds: [helpEmbed(isStaff(i.member, i.guild.id), verifyEnabled())],
@@ -587,6 +631,56 @@ async function handlePayCmd(i) {
   });
 }
 
+// /pay — payer re-fetches their pay command without needing the panel.
+async function handlePayCommand(i) {
+  let c = null;
+  const id = i.options.getInteger("contract");
+  if (id) {
+    c = store.getContract(id);
+    if (!c || c.guild_id !== i.guild.id) {
+      return i.reply({ content: `No contract #${id} on file.`, ephemeral: true });
+    }
+  } else {
+    // Find a payable contract in this channel where the user is the payer.
+    const candidates = store
+      .listContracts({ guild_id: i.guild.id })
+      .filter(
+        (x) =>
+          x.channel_id === i.channel.id &&
+          (x.payment_code || x.current_rent_code) &&
+          x.parties.some(
+            (p) => p.user_id === i.user.id && (p.key === "buyer" || p.key === "tenant")
+          )
+      )
+      .sort((a, b) => b.created_at - a.created_at);
+    c = candidates[0] || null;
+    if (!c) {
+      return i.reply({
+        content: "I couldn't find a payment for you here. Run this in your ticket, or use `/pay contract:<id>`.",
+        ephemeral: true,
+      });
+    }
+  }
+
+  const { payer, memo, amount } = payerInfo(c);
+  if (i.user.id !== payer?.user_id && !isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "That payment isn't yours.", ephemeral: true });
+  }
+  if (!memo) return i.reply({ content: "There's no active payment for that contract.", ephemeral: true });
+
+  const cmd = config.deal.payCommandTemplate
+    .replace("{firm}", config.verify.firmName)
+    .replace("{amount}", String(amount))
+    .replace("{memo}", memo);
+  const noun = c.type === "lease" ? `Week ${c.rent_week} rent` : "payment";
+  return i.reply({
+    content:
+      `Your ${noun} for contract #${c.id} (plot ${c.fields.plot}):\n\`\`\`\n${cmd}\n\`\`\`\n` +
+      `Memo must be exactly \`${memo}\`. You can pay in installments; use **Check payment** or \`/pay\` again to see progress.`,
+    ephemeral: true,
+  });
+}
+
 async function handlePayCheck(i) {
   const id = Number(i.customId.split("_")[2]);
   const c = store.getContract(id);
@@ -884,7 +978,7 @@ async function handleList(i) {
   const forum = forums?.[category];
   if (!forum) {
     return i.reply({
-      content: `No listing channel for **${category}** — run \`!resetup\` to create the listing forums.`,
+      content: `No listing channel for **${category}** — run \`/resetup\` to create the listing forums.`,
       ephemeral: true,
     });
   }
@@ -1089,7 +1183,7 @@ async function closeTicketInteraction(i) {
     });
   }
   store.closeTicket(i.channel.id);
-  await i.reply({ content: "🔒 Closing this ticket in 5 seconds…" });
+  await i.reply({ content: "🔒 Closing this ticket in 5 seconds…", ephemeral: true });
   setTimeout(() => i.channel.delete().catch(() => {}), 5000);
 }
 
@@ -1134,7 +1228,7 @@ async function panelContracts(i) {
   await refreshPaidFromLedger(all); // live payment totals (one API call)
   const lines = all.map(contractLine);
   return i.editReply(
-    "**Recent contracts:**\n" + lines.join("\n").slice(0, 1800) + "\n\nUse `!contract <id>` to re-pull a PDF."
+    "**Recent contracts:**\n" + lines.join("\n").slice(0, 1800) + "\n\nUse `/contract id:<id>` to re-pull a PDF."
   );
 }
 
@@ -1304,60 +1398,51 @@ async function checkVerification(i) {
 // ===========================================================================
 // Commands
 // ===========================================================================
+// Messages are only used for the anti-spam raid guard now — all commands are
+// slash commands with private (ephemeral) replies.
 client.on(Events.MessageCreate, async (msg) => {
   try {
     if (msg.author.bot || !msg.guild) return;
-    if (await raidGuard(msg)) return;
-    if (!msg.content.startsWith(config.prefix)) return;
-    const [cmd, ...rest] = msg.content
-      .slice(config.prefix.length)
-      .trim()
-      .split(/\s+/);
-    const command = cmd.toLowerCase();
-
-    if (command === "setup") return handleSetup(msg);
-    if (command === "resetup") return handleResetup(msg);
-    if (command === "close") return handleClose(msg);
-    if (command === "help") return handleHelp(msg);
-    if (command === "contracts") return handleContractList(msg, rest);
-    if (command === "contract") return handleContractShow(msg, rest);
+    await raidGuard(msg);
   } catch (err) {
     console.error("messageCreate error:", err);
   }
 });
 
-async function handleSetup(msg) {
-  if (!msg.member?.permissions.has(PermissionFlagsBits.ManageGuild)) {
-    return msg.reply("You need the **Manage Server** permission to run this.");
+async function handleSetupCmd(i) {
+  if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    return i.reply({ content: "You need the **Manage Server** permission to run this.", ephemeral: true });
   }
-  await msg.channel.send({ embeds: [panelEmbed()], components: [panelButtons()] });
-  msg.delete().catch(() => {});
+  await i.channel.send({ embeds: [panelEmbed()], components: [panelButtons()] });
+  return i.reply({ content: "✅ Posted the client panel here.", ephemeral: true });
 }
 
-async function handleResetup(msg) {
-  if (!msg.member?.permissions.has(PermissionFlagsBits.ManageGuild)) {
-    return msg.reply("You need the **Manage Server** permission to run this.");
+async function handleResetupCmd(i) {
+  if (!i.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+    return i.reply({ content: "You need the **Manage Server** permission to run this.", ephemeral: true });
   }
-  store.setGuildConfig(msg.guild.id, { configured: false });
-  await msg.reply("🔧 Re-running setup…");
-  await ensureGuildSetup(msg.guild, client);
-  await msg.reply(
+  await i.deferReply({ ephemeral: true });
+  store.setGuildConfig(i.guild.id, { configured: false });
+  await ensureGuildSetup(i.guild, client);
+  return i.editReply(
     "✅ Setup re-run. New roles/channels were created" +
       (verifyEnabled() ? " (including verification)." : ".") +
       " Old ones aren't deleted — remove any duplicates."
   );
 }
 
-async function handleClose(msg) {
-  if (!store.isTicketChannel(msg.channel.id)) return;
-  const ticket = store.getTicket(msg.channel.id);
-  const owner = ticket && ticket.user_id === msg.author.id;
-  if (!owner && !isStaff(msg.member, msg.guild.id)) {
-    return msg.reply("Only the client or a realtor/manager can close this ticket.");
+async function handleCloseCmd(i) {
+  if (!store.isTicketChannel(i.channel.id)) {
+    return i.reply({ content: "This isn't an open ticket.", ephemeral: true });
   }
-  store.closeTicket(msg.channel.id);
-  await msg.reply("🔒 Closing this ticket in 5 seconds…");
-  setTimeout(() => msg.channel.delete().catch(() => {}), 5000);
+  const ticket = store.getTicket(i.channel.id);
+  const owner = ticket && ticket.user_id === i.user.id;
+  if (!owner && !isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Only the client or a realtor/manager can close this ticket.", ephemeral: true });
+  }
+  store.closeTicket(i.channel.id);
+  await i.reply({ content: "🔒 Closing this ticket in 5 seconds…", ephemeral: true });
+  setTimeout(() => i.channel.delete().catch(() => {}), 5000);
 }
 
 // --- Contract archive / lookup (staff) -------------------------------------
@@ -1402,84 +1487,56 @@ function contractLine(c) {
   return `${statusIcon(c.status)} **#${c.id}** ${c.type} — ${names} — plot ${c.fields.plot} · ${amt}`;
 }
 
-async function handleContractList(msg, rest) {
-  if (!isStaff(msg.member, msg.guild.id)) {
-    return msg.reply("Only realtors or managers can look up contracts.");
+async function handleContractsCmd(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Only realtors or managers can look up contracts.", ephemeral: true });
   }
   const all = store
-    .listContracts({ guild_id: msg.guild.id })
+    .listContracts({ guild_id: i.guild.id })
     .sort((a, b) => b.created_at - a.created_at);
-  if (!all.length) return msg.reply("No contracts on file yet.");
+  if (!all.length) return i.reply({ content: "No contracts on file yet.", ephemeral: true });
 
-  const mention = msg.mentions.users.first();
-  const arg = rest
-    .filter((t) => !t.startsWith("<@"))
-    .join(" ")
-    .trim()
-    .toLowerCase();
+  await i.deferReply({ ephemeral: true });
+  const user = i.options.getUser("user");
+  const status = i.options.getString("status");
+  const search = i.options.getString("search")?.toLowerCase();
 
   let results = all;
   let label = "Recent contracts";
-  if (mention) {
-    results = all.filter((c) => c.parties.some((p) => p.user_id === mention.id));
-    label = `Contracts involving ${mention.username}`;
-  } else if (["pending", "signed", "void"].includes(arg)) {
-    results = all.filter((c) => c.status === arg);
-    label = `${arg[0].toUpperCase()}${arg.slice(1)} contracts`;
-  } else if (arg) {
-    results = all.filter((c) => contractSearchText(c).includes(arg));
-    label = `Contracts matching "${arg}"`;
+  if (user) {
+    results = all.filter((c) => c.parties.some((p) => p.user_id === user.id));
+    label = `Contracts involving ${user.username}`;
+  } else if (status) {
+    results = all.filter((c) => c.status === status);
+    label = `${status[0].toUpperCase()}${status.slice(1)} contracts`;
+  } else if (search) {
+    results = all.filter((c) => contractSearchText(c).includes(search));
+    label = `Contracts matching "${search}"`;
   }
-  if (!results.length) return msg.reply("No matching contracts.");
+  if (!results.length) return i.editReply("No matching contracts.");
 
   const shown = results.slice(0, 15);
   await refreshPaidFromLedger(shown); // live payment totals (one API call)
   const lines = shown.map(contractLine);
-  return msg.reply(
+  return i.editReply(
     `**${label}** (${results.length} found)\n` +
       lines.join("\n").slice(0, 1800) +
-      `\n\nUse \`${config.prefix}contract <id>\` to re-pull a contract + PDF.`
+      `\n\nUse \`/contract id:<id>\` to re-pull a contract + PDF.`
   );
 }
 
-async function handleContractShow(msg, rest) {
-  if (!isStaff(msg.member, msg.guild.id)) {
-    return msg.reply("Only realtors or managers can look up contracts.");
+async function handleContractCmd(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Only realtors or managers can look up contracts.", ephemeral: true });
   }
-  const id = Number.parseInt(rest[0] ?? "", 10);
-  if (Number.isNaN(id)) {
-    return msg.reply(`Usage: \`${config.prefix}contract <id>\``);
-  }
+  const id = i.options.getInteger("id");
   const c = store.getContract(id);
-  if (!c || c.guild_id !== msg.guild.id) {
-    return msg.reply(`No contract #${id} on file.`);
+  if (!c || c.guild_id !== i.guild.id) {
+    return i.reply({ content: `No contract #${id} on file.`, ephemeral: true });
   }
+  await i.deferReply({ ephemeral: true });
   const files = c.status === "signed" ? [await pdfAttachment(c)] : [];
-  return msg.reply({ embeds: [contractEmbed(c)], files });
-}
-
-async function handleHelp(msg) {
-  return msg.reply(
-    [
-      `**${config.brandName} — commands**`,
-      `\`${config.prefix}setup\` — post the Buy/Sell panel (admin)`,
-      `\`${config.prefix}close\` — close this ticket (client or staff)`,
-      "",
-      "**Realtors/managers — issue a contract (slash commands):**",
-      "`/seller-agreement` — exclusive listing agreement (seller + realtor sign)",
-      "`/purchase-agreement` — purchase agreement (buyer + seller + realtor sign)",
-      "`/lease-agreement` — lease / rental agreement (landlord + tenant + realtor sign)",
-      "Parties click **Sign**; once all have signed, a PDF record is posted and archived.",
-      "`/complete-deal contract:<id>` — after the buyer pays the firm, confirm transfer and auto-release seller proceeds + commission",
-      "`/list` — post a plot listing (category, sale/rent, plot, price, image) to the category forum",
-      "",
-      "**Look up past contracts:**",
-      `\`${config.prefix}contracts\` — recent contracts (add \`@user\`, a status \`pending/signed/void\`, or a plot/name to filter)`,
-      `\`${config.prefix}contract <id>\` — re-show a contract and re-pull its PDF`,
-      "",
-      "Clients open tickets with the buttons on the Client Desk panel.",
-    ].join("\n")
-  );
+  return i.editReply({ embeds: [contractEmbed(c)], files });
 }
 
 // Optional health endpoint for panel hosts.

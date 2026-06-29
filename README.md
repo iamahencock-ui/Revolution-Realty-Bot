@@ -26,7 +26,7 @@ pay in parts. **Check payment** reports progress (e.g. `paid $30,000 / $50,000,
 $20,000 remaining`); a sale only releases (`/complete-deal`) once the total is
 reached, and a week's rent only escrows once fully paid.
 
-`!contracts` and `/panel → Recent contracts` show **live** payment status —
+`/contracts` and `/panel → Recent contracts` show **live** payment status —
 `paid $X/$Y` for sales, `rent $R/wk · wk N: $X/$Y` for leases (and the old lease
 "(undefined)" is fixed). The totals are re-summed straight from the ledger each
 time (one API call fetches the firm's transactions and sums every contract's
@@ -143,11 +143,11 @@ re-runnable — if one transfer fails, re-running pays only what's still owed
 
 Realtors/managers can find and re-pull any past contract:
 
-- `!contracts` — the most recent contracts.
-- `!contracts @user` — every contract a user is a party to.
-- `!contracts signed` (or `pending` / `void`) — filter by status.
-- `!contracts c244` — search by plot, party name, type, or price.
-- `!contract <id>` — re-show a specific contract and re-attach its signed PDF.
+- `/contracts` — the most recent contracts.
+- `/contracts user:@user` — every contract a user is a party to.
+- `/contracts status:signed` (or pending / void) — filter by status.
+- `/contracts search:c244` — search by plot, party name, type, or price.
+- `/contract id:<id>` — re-show a specific contract and re-attach its signed PDF.
 
 Every fully-signed contract is also auto-filed in the private **contract-archive**
 channel when it completes.
@@ -168,7 +168,7 @@ verify the Minecraft account they deal under** before the Client Desk unlocks:
 
 An IGN can only be claimed by one Discord user. Configure the displayed pay
 command, firm name, and amount in `config.js → verify`. To turn verification on
-for an already-set-up server, add the env vars and run `!resetup`.
+for an already-set-up server, add the env vars and run `/resetup`.
 
 ## Contracts (Milestone 2)
 
@@ -218,10 +218,10 @@ owner a summary. Assign the Realtor/Manager roles to your staff.
 - Clients click **Buy a plot** or **Sell a plot** on the panel.
 - The bot opens a **private channel** (`buy-name` / `sell-name`) visible only to
   the client, Realtors, Managers, and the bot, and pings a realtor.
-- The client or any realtor/manager can **close** it (button or `!close`), which
+- The client or any realtor/manager can **close** it (button or `/close`), which
   deletes the channel after 5 seconds.
 
-Commands: `!setup` (admin — re-post the panel), `!close`, `!help`.
+Commands: `/setup` (admin — re-post the panel), `/close`, `/help`.
 
 ## Files
 

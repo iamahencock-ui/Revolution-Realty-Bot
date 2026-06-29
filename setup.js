@@ -307,8 +307,8 @@ async function notifyOwner(guild, cfg) {
         "",
         cfg.verifyChannelId
           ? "**Verification is ON** — clients must verify their IGN before the Client Desk unlocks."
-          : "Verification is off (set `DC_API_TOKEN` + `VERIFY_ACCOUNT_ID`, then `!resetup`, to require IGN verification).",
-        "**Next:** assign the Realtor/Manager roles to your staff. Run `!help` in a ticket for commands.",
+          : "Verification is off (set `DC_API_TOKEN` + `VERIFY_ACCOUNT_ID`, then `/resetup`, to require IGN verification).",
+        "**Next:** assign the Realtor/Manager roles to your staff. Run `/help` for commands.",
       ].join("\n")
     );
   await owner.send({ embeds: [embed] });
