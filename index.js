@@ -492,6 +492,12 @@ async function checkVerification(i) {
   const roleId = gcfg(i.guild.id, "verifiedRoleId");
   if (roleId) await i.member.roles.add(roleId).catch(() => {});
 
+  // Rename the member to their IGN (needs Manage Nicknames + the bot's role
+  // above theirs; silently skipped for the owner / higher roles).
+  if (config.verify.setNicknameToIgn && result.ign) {
+    await i.member.setNickname(result.ign).catch(() => {});
+  }
+
   const desk = gcfg(i.guild.id, "deskChannelId");
   return i.editReply(
     `✅ Verified as **${result.ign ?? "your account"}**! ` +

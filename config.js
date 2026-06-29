@@ -28,6 +28,7 @@ export const config = {
   verify: {
     amount: "0.01", // the micro-charge (decimal string)
     firmName: "RevolutionRealty", // firm that receives the payment
+    setNicknameToIgn: true, // rename verified members to their IGN
     // Shown to the user. {firm}/{amount}/{memo} are filled in. Adjust to match
     // however payments are sent to your account on DemocracyCraft.
     payCommandTemplate: "/pay-account business {firm} {amount} {memo}",
