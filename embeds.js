@@ -52,6 +52,42 @@ export function closeButton() {
   );
 }
 
+// --- Payment panels ---------------------------------------------------------
+export function paymentPanelEmbed(contract, { amount, weekly, week }) {
+  const plot = contract.fields.plot;
+  const e = new EmbedBuilder().setColor(weekly ? 0x38a169 : config.brandColor);
+  if (weekly) {
+    e.setTitle(`🏠 Weekly rent due — Week ${week}`).setDescription(
+      `Your rent of **${amount}/week** for plot **${plot}** is due.\n\n` +
+        "Click **Get pay command** for the exact in-game command (with your unique memo), " +
+        "pay the firm, then hit **Check payment**."
+    );
+  } else {
+    e.setTitle("💳 Payment due — pay now").setDescription(
+      `To complete your purchase of plot **${plot}**, pay the firm the full price of **${amount}**.\n\n` +
+        "1. Click **Get pay command** for the exact command (with your unique memo).\n" +
+        "2. Run it in-game.\n" +
+        "3. Click **Check payment** to confirm it landed."
+    );
+  }
+  return e.setFooter({ text: `${config.brandName} • Contract #${contract.id}` });
+}
+
+export function paymentPanelButtons(contract) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`pay_cmd_${contract.id}`)
+      .setLabel("Get pay command")
+      .setEmoji("💳")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`pay_check_${contract.id}`)
+      .setLabel("Check payment")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success)
+  );
+}
+
 // --- Help -------------------------------------------------------------------
 export function helpEmbed(isStaff, verifyOn) {
   const e = new EmbedBuilder()
@@ -62,6 +98,7 @@ export function helpEmbed(isStaff, verifyOn) {
   const client = [
     "• Open a ticket from the **Client Desk** — **Buy a plot** or **Sell a plot** — and a realtor will assist you.",
     "• Browse current listings in the **Residential / Commercial / Skyscraper / Industrial** forums.",
+    "• After a contract is signed, use the **payment panel** in your ticket: **Get pay command** → pay in-game → **Check payment**.",
   ];
   if (verifyOn) {
     client.push("• Verify your Minecraft account in the **verify** channel to unlock the Client Desk.");

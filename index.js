@@ -25,6 +25,8 @@ import {
   verifyConfirmButton,
   listingEmbed,
   helpEmbed,
+  paymentPanelEmbed,
+  paymentPanelButtons,
 } from "./embeds.js";
 import {
   contractEmbed,
@@ -111,7 +113,7 @@ const leaseCmd = new SlashCommandBuilder()
   .addUserOption((o) => o.setName("landlord").setDescription("The landlord (property owner)").setRequired(true))
   .addUserOption((o) => o.setName("tenant").setDescription("The tenant (renter)").setRequired(true))
   .addStringOption((o) => o.setName("plot").setDescription("Plot number / /gps").setRequired(true))
-  .addStringOption((o) => o.setName("rent").setDescription("Rent (e.g. 500/week)").setRequired(true))
+  .addNumberOption((o) => o.setName("rent").setDescription("Weekly rent — number only (the /week is added automatically)").setRequired(true))
   .addStringOption((o) => o.setName("term").setDescription("Lease term (e.g. 4 weeks; default 4 weeks)").setRequired(false))
   .addStringOption((o) => o.setName("deposit").setDescription("Security deposit").setRequired(false))
   .addStringOption((o) => o.setName("description").setDescription("Property description").setRequired(false))
@@ -165,6 +167,9 @@ client.once(Events.ClientReady, async (c) => {
     await ensureGuildSetup(guild, c).catch((e) => console.error("setup:", e));
     await registerCommands(guild);
   }
+  // Weekly recurring rent reminders (checked every 30 min).
+  checkRecurringRent().catch(() => {});
+  setInterval(() => checkRecurringRent().catch(() => {}), 30 * 60 * 1000);
 });
 
 client.on(Events.GuildCreate, async (guild) => {
@@ -197,6 +202,8 @@ client.on(Events.InteractionCreate, async (i) => {
       else if (i.customId === "ticket_close") await closeTicketInteraction(i);
       else if (i.customId.startsWith("contract_sign_")) await signContract(i);
       else if (i.customId.startsWith("contract_void_")) await voidContract(i);
+      else if (i.customId.startsWith("pay_cmd_")) await handlePayCmd(i);
+      else if (i.customId.startsWith("pay_check_")) await handlePayCheck(i);
       else if (i.customId === "verify_start") await startVerification(i);
       else if (i.customId === "verify_check") await checkVerification(i);
     }
@@ -303,7 +310,7 @@ async function issueContract(i, type) {
       realtor_ign: linkedIgn(i.user.id),
       plot: o.getString("plot"),
       plot_desc: o.getString("description") ?? "—",
-      rent: o.getString("rent"),
+      rent: o.getNumber("rent"), // weekly rent as a number
       deposit: o.getString("deposit") ?? c.depositDefault,
       commission: o.getString("commission") ?? c.commissionDefault,
       special: o.getString("special") ?? c.specialDefault,
@@ -400,27 +407,168 @@ async function signContract(i) {
       }).catch(() => {});
     }
 
-    // Purchase agreement + escrow on → tell the buyer how to pay the firm.
-    if (contract.type === "purchase" && dealEnabled()) {
-      const code = newMemoCode();
-      contract.payment_code = code;
+    // Set up the buyer/tenant payment panel(s).
+    await setupPostSignPayments(contract, i.channel);
+  }
+}
+
+// ===========================================================================
+// Payment panels + recurring rent
+// ===========================================================================
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function parseTermMs(term) {
+  const m = String(term).match(/(\d+)\s*(day|week|month)/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2].toLowerCase();
+  const ms = unit === "day" ? 86400000 : unit === "week" ? WEEK_MS : 30 * 86400000;
+  return n * ms;
+}
+
+async function setupPostSignPayments(contract, channel) {
+  if (!dealEnabled()) return;
+
+  if (contract.type === "purchase") {
+    contract.payment_code = newMemoCode();
+    store.saveContract();
+    const buyer = contract.parties.find((p) => p.key === "buyer");
+    const amount = money(parseAmount(contract.fields.price));
+    await channel
+      .send({
+        content: `<@${buyer.user_id}>`,
+        embeds: [paymentPanelEmbed(contract, { amount })],
+        components: [paymentPanelButtons(contract)],
+        allowedMentions: { users: [buyer.user_id] },
+      })
+      .catch(() => {});
+  } else if (contract.type === "lease") {
+    contract.rent_active = true;
+    contract.rent_week = 1;
+    contract.current_rent_code = newMemoCode();
+    contract.next_rent_at = Date.now() + WEEK_MS;
+    const dur = parseTermMs(contract.fields.term);
+    if (dur) contract.lease_until = Date.now() + dur;
+    store.saveContract();
+    await postWeeklyRent(contract, channel);
+  }
+}
+
+async function postWeeklyRent(contract, channel) {
+  const tenant = contract.parties.find((p) => p.key === "tenant");
+  await channel
+    .send({
+      content: `<@${tenant.user_id}>`,
+      embeds: [
+        paymentPanelEmbed(contract, {
+          amount: money(contract.fields.rent),
+          weekly: true,
+          week: contract.rent_week,
+        }),
+      ],
+      components: [paymentPanelButtons(contract)],
+      allowedMentions: { users: [tenant.user_id] },
+    })
+    .catch(() => {});
+}
+
+// Who pays + the active memo/amount for a contract.
+function payerInfo(c) {
+  const payer =
+    c.type === "lease"
+      ? c.parties.find((p) => p.key === "tenant")
+      : c.parties.find((p) => p.key === "buyer");
+  const memo = c.type === "lease" ? c.current_rent_code : c.payment_code;
+  const amount = c.type === "lease" ? Number(c.fields.rent) : parseAmount(c.fields.price);
+  return { payer, memo, amount };
+}
+
+async function handlePayCmd(i) {
+  const id = Number(i.customId.split("_")[2]);
+  const c = store.getContract(id);
+  if (!c) return i.reply({ content: "Contract not found.", ephemeral: true });
+  const { payer, memo, amount } = payerInfo(c);
+  if (i.user.id !== payer?.user_id && !isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "This payment is for the buyer/tenant.", ephemeral: true });
+  }
+  if (!memo) return i.reply({ content: "No payment is set up for this contract.", ephemeral: true });
+  const payCmd = config.deal.payCommandTemplate
+    .replace("{firm}", config.verify.firmName)
+    .replace("{amount}", String(amount))
+    .replace("{memo}", memo);
+  return i.reply({
+    content:
+      `Run this in-game to pay:\n\`\`\`\n${payCmd}\n\`\`\`\nThe memo must be exactly \`${memo}\`. ` +
+      "Then come back and click **Check payment**.",
+    ephemeral: true,
+  });
+}
+
+async function handlePayCheck(i) {
+  const id = Number(i.customId.split("_")[2]);
+  const c = store.getContract(id);
+  if (!c) return i.reply({ content: "Contract not found.", ephemeral: true });
+  const { payer, memo, amount } = payerInfo(c);
+  if (i.user.id !== payer?.user_id && !isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "This is for the buyer/tenant.", ephemeral: true });
+  }
+  if (!dealEnabled() || !memo) {
+    return i.reply({ content: "Payments aren't configured for this contract.", ephemeral: true });
+  }
+  await i.deferReply({ ephemeral: true });
+
+  const pay = await findVerificationPayment(memo, amount);
+  if (!pay.ok) return i.editReply(`Couldn't reach the economy API (\`${pay.error}\`). Try again shortly.`);
+  if (!pay.found) {
+    return i.editReply(
+      `I haven't seen a payment of **${money(amount)}** with memo \`${memo}\` yet. Pay, wait a few seconds, then click again.`
+    );
+  }
+
+  if (c.type === "lease") {
+    c.last_rent_paid_week = c.rent_week;
+    store.saveContract();
+    await i.editReply(`✅ Rent received for **Week ${c.rent_week}** — thank you!`);
+    await i.channel
+      .send(`✅ <@${payer.user_id}> paid Week ${c.rent_week} rent (${money(amount)}).`)
+      .catch(() => {});
+  } else {
+    c.payment_received = true;
+    store.saveContract();
+    const realtor = c.parties.find((p) => p.key === "realtor");
+    await i.editReply(`✅ Payment of **${money(amount)}** received! A realtor will transfer the plot and finalize.`);
+    await i.channel
+      .send(
+        `✅ <@${payer.user_id}>'s payment for plot **${c.fields.plot}** is confirmed. ` +
+          `<@${realtor.user_id}> — transfer the plot, then run \`/complete-deal contract:${c.id}\`.`
+      )
+      .catch(() => {});
+  }
+}
+
+// Weekly recurring rent reminders.
+async function checkRecurringRent() {
+  const now = Date.now();
+  for (const c of store.listContracts({})) {
+    if (c.type !== "lease" || !c.rent_active) continue;
+    if (c.lease_until && now > c.lease_until) {
+      c.rent_active = false;
       store.saveContract();
-      const buyer = contract.parties.find((p) => p.key === "buyer");
-      const priceNum = parseAmount(contract.fields.price);
-      const payCmd = config.deal.payCommandTemplate
-        .replace("{firm}", config.verify.firmName)
-        .replace("{amount}", String(priceNum))
-        .replace("{memo}", code);
-      await i.channel
-        .send({
-          content:
-            `<@${buyer.user_id}> 💳 To complete the purchase, pay the firm the full price in-game:\n` +
-            "```\n" + payCmd + "\n```" +
-            `Memo must be exactly: \`${code}\`\n` +
-            `Once paid, a realtor will run \`/complete-deal contract:${contract.id}\` to release funds.`,
-          allowedMentions: { users: [buyer.user_id] },
-        })
-        .catch(() => {});
+      const ch = await client.channels.fetch(c.channel_id).catch(() => null);
+      ch?.send?.(`🏁 Lease #${c.id} term has ended — weekly rent reminders stopped.`).catch(() => {});
+      continue;
+    }
+    if (c.next_rent_at && now >= c.next_rent_at) {
+      c.rent_week = (c.rent_week || 1) + 1;
+      c.current_rent_code = newMemoCode();
+      c.next_rent_at = now + WEEK_MS;
+      store.saveContract();
+      const ch = await client.channels.fetch(c.channel_id).catch(() => null);
+      if (ch) await postWeeklyRent(c, ch);
+      else {
+        c.rent_active = false; // channel gone
+        store.saveContract();
+      }
     }
   }
 }

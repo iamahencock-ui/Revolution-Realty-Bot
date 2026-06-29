@@ -21,9 +21,24 @@ anti-spam.
 ## Lease Agreement (Milestone 7)
 
 `/lease-agreement` issues a rental contract — **landlord + tenant + realtor**
-all sign. Fields: plot, rent (e.g. `500/week`), term (default 4 weeks),
-security deposit, description, commission, special requirements. Same
-sign-in-place embed + PDF record + archive flow as the sale/purchase contracts.
+all sign. Fields: plot, **rent (a number — the `/week` is added automatically)**,
+term (default 4 weeks), security deposit, description, commission, special
+requirements. Same sign-in-place embed + PDF record + archive flow.
+
+## Payment panels + recurring rent (Milestone 8)
+
+When a contract is fully signed, the bot posts a **payment panel** in the ticket
+addressed to the buyer/tenant:
+
+- **Get pay command** (buyer/tenant only) — shows, *privately*, the exact in-game
+  pay command pre-filled with the amount and a **unique 32-char memo**.
+- **Check payment** — verifies the firm received a payment with that memo for the
+  **full amount**, then confirms and pings the realtor to transfer + `/complete-deal`.
+
+**Sales** get a one-time panel for the full price. **Leases** get a **recurring
+weekly** panel: every week the bot pings the tenant with a fresh memo for that
+week's rent, until the lease term ends. Each week's payment is verified
+independently. (Requires `DC_API_TOKEN` + `VERIFY_ACCOUNT_ID`.)
 
 ## Listings (Milestone 6)
 
