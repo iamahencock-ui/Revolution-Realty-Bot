@@ -61,6 +61,14 @@ export async function ensureGuildSetup(guild, client) {
         reason: "Revolution Realty setup",
       })
     );
+    cfg.collectionsRoleId = await mk(() =>
+      guild.roles.create({
+        name: "Collections",
+        color: 0xc53030,
+        mentionable: true,
+        reason: "Revolution Realty setup",
+      })
+    );
     if (gated) {
       cfg.verifiedRoleId = await mk(() =>
         guild.roles.create({
@@ -99,6 +107,20 @@ export async function ensureGuildSetup(guild, client) {
         name: "automod-log",
         type: ChannelType.GuildText,
         permissionOverwrites: staffView,
+      })
+    );
+
+    // Arrears / payments-due alerts (staff + collections).
+    cfg.paymentsDueChannelId = await mk(() =>
+      guild.channels.create({
+        name: "payments-due",
+        type: ChannelType.GuildText,
+        permissionOverwrites: [
+          ...staffView,
+          ...(cfg.collectionsRoleId
+            ? [{ id: cfg.collectionsRoleId, allow: [V, S, R] }]
+            : []),
+        ],
       })
     );
 
@@ -267,11 +289,13 @@ async function notifyOwner(guild, cfg) {
         line("Manager role", cfg.managerRoleId),
         line("Realtor role", cfg.realtorRoleId),
         line("Contractor role", cfg.contractorRoleId),
+        line("Collections role", cfg.collectionsRoleId),
         ...(cfg.verifiedRoleId ? [line("Verified role", cfg.verifiedRoleId)] : []),
         line("Client desk (panel)", cfg.deskChannelId, "ch"),
         ...(cfg.verifyChannelId ? [line("Verify channel", cfg.verifyChannelId, "ch")] : []),
         line("Contractors", cfg.contractorsChannelId, "ch"),
         line("Contract archive", cfg.contractArchiveChannelId, "ch"),
+        line("Payments due", cfg.paymentsDueChannelId, "ch"),
         line("AutoMod log", cfg.automodLogChannelId, "ch"),
         `• Listing forums: ${
           Object.keys(cfg.listingForums || {}).length

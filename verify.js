@@ -83,6 +83,57 @@ export async function findVerificationPayment(code, minAmount = 0.01, limit = 10
   };
 }
 
+// Sum ALL payments carrying `code` in their memo (supports partial/installment
+// payments). Returns { ok, total, count, ign, uuid }.
+export async function sumPaymentsWithMemo(code, limit = 100) {
+  const acct = VERIFY_ACCOUNT_ID();
+  if (!acct) return { ok: false, error: "NO_ACCOUNT" };
+  const r = await apiGet(`/api/v1/accounts/${acct}/transactions?limit=${limit}`);
+  if (!r.ok) return r;
+
+  const items = r.data.items || [];
+  const needle = code.toLowerCase();
+  const has = (s) => (s || "").toLowerCase().includes(needle);
+
+  let total = 0;
+  let count = 0;
+  let uuid = null;
+  for (const t of items) {
+    if (has(t.memo) || has(t.message)) {
+      const amt = Math.abs(Number(t.amount)) || 0;
+      if (amt <= 0) continue;
+      total += amt;
+      count++;
+      if (!uuid && t.initiatorUuid) uuid = t.initiatorUuid;
+    }
+  }
+  const ign = uuid ? await ignForUuid(uuid) : null;
+  return { ok: true, total, count, uuid, ign };
+}
+
+// Fetch the firm account's recent transactions once (to sum many memos locally).
+export async function fetchLedger(limit = 100) {
+  const acct = VERIFY_ACCOUNT_ID();
+  if (!acct) return { ok: false, error: "NO_ACCOUNT" };
+  const r = await apiGet(`/api/v1/accounts/${acct}/transactions?limit=${limit}`);
+  if (!r.ok) return r;
+  return { ok: true, items: r.data.items || [] };
+}
+
+// Sum payments carrying `code` from an already-fetched ledger item list.
+export function sumInLedger(items, code) {
+  const needle = code.toLowerCase();
+  const has = (s) => (s || "").toLowerCase().includes(needle);
+  let total = 0;
+  for (const t of items || []) {
+    if (has(t.memo) || has(t.message)) {
+      const a = Math.abs(Number(t.amount)) || 0;
+      if (a > 0) total += a;
+    }
+  }
+  return total;
+}
+
 // Send a payment to a player by IGN (firm account -> player). Money is a
 // decimal string; idempotency key makes retries safe.
 export async function payToPlayer(playerName, amount, memo) {

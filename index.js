@@ -45,6 +45,9 @@ import {
   verifyEnabled,
   newMemoCode,
   findVerificationPayment,
+  sumPaymentsWithMemo,
+  fetchLedger,
+  sumInLedger,
   dealEnabled,
   payToPlayer,
 } from "./verify.js";
@@ -74,6 +77,8 @@ const ENV_FALLBACK = {
   contractorRoleId: process.env.CONTRACTOR_ROLE_ID,
   contractorsChannelId: process.env.CONTRACTORS_CHANNEL_ID,
   automodLogChannelId: process.env.AUTOMOD_LOG_CHANNEL_ID,
+  collectionsRoleId: process.env.COLLECTIONS_ROLE_ID,
+  paymentsDueChannelId: process.env.PAYMENTS_DUE_CHANNEL_ID,
 };
 function gcfg(guildId, key) {
   const gc = store.getGuildConfig(guildId);
@@ -595,39 +600,75 @@ async function handlePayCheck(i) {
   }
   await i.deferReply({ ephemeral: true });
 
-  const pay = await findVerificationPayment(memo, amount);
-  if (!pay.ok) return i.editReply(`Couldn't reach the economy API (\`${pay.error}\`). Try again shortly.`);
-  if (!pay.found) {
-    return i.editReply(
-      `I haven't seen a payment of **${money(amount)}** with memo \`${memo}\` yet. Pay, wait a few seconds, then click again.`
-    );
-  }
+  // Sum ALL payments with the memo (supports installments / partial payments).
+  const sum = await sumPaymentsWithMemo(memo);
+  if (!sum.ok) return i.editReply(`Couldn't reach the economy API (\`${sum.error}\`). Try again shortly.`);
+  const paid = sum.total;
+  const remaining = Math.max(0, amount - paid);
+  const noun = c.type === "lease" ? "rent" : "payment";
 
   if (c.type === "lease") {
+    c.week_paid = paid;
+    store.saveContract();
+    if (paid < amount) {
+      await i.editReply(
+        `🧾 Week ${c.rent_week} ${noun}: **${money(paid)} / ${money(amount)}** paid, **${money(remaining)}** remaining.`
+      );
+      await alertArrears(c, i.guild.id, { paid, owed: amount, label: `Week ${c.rent_week} rent` });
+      return;
+    }
+    // Fully paid this week.
     c.last_rent_paid_week = c.rent_week;
     store.saveContract();
     await i.editReply(`✅ Rent received for **Week ${c.rent_week}** — thank you!`);
-    await i.channel
-      .send(`✅ <@${payer.user_id}> paid Week ${c.rent_week} rent (${money(amount)}).`)
-      .catch(() => {});
-
-    // Escrow: split this week's rent — landlord gets (rent - commission),
-    // realtor gets their commission share, company keeps the rest.
+    await i.channel.send(`✅ <@${payer.user_id}> paid Week ${c.rent_week} rent in full (${money(amount)}).`).catch(() => {});
     if (config.deal.rentEscrow && (c.last_paid_out_week || 0) < c.rent_week) {
       await releaseRent(c, amount, i.channel);
     }
   } else {
+    c.amount_paid = paid;
+    store.saveContract();
+    if (paid < amount) {
+      await i.editReply(
+        `🧾 ${noun[0].toUpperCase()}${noun.slice(1)}: **${money(paid)} / ${money(amount)}** paid, **${money(remaining)}** remaining.`
+      );
+      await alertArrears(c, i.guild.id, { paid, owed: amount, label: "Purchase" });
+      return;
+    }
+    // Fully paid.
     c.payment_received = true;
     store.saveContract();
     const realtor = c.parties.find((p) => p.key === "realtor");
-    await i.editReply(`✅ Payment of **${money(amount)}** received! A realtor will transfer the plot and finalize.`);
+    await i.editReply(`✅ Full payment of **${money(amount)}** received! A realtor will transfer the plot and finalize.`);
     await i.channel
       .send(
-        `✅ <@${payer.user_id}>'s payment for plot **${c.fields.plot}** is confirmed. ` +
+        `✅ <@${payer.user_id}>'s payment for plot **${c.fields.plot}** is confirmed (${money(paid)}). ` +
           `<@${realtor.user_id}> — transfer the plot, then run \`/complete-deal contract:${c.id}\`.`
       )
       .catch(() => {});
   }
+}
+
+// Ping Collections in the payments-due channel about an incomplete payment.
+async function alertArrears(c, guildId, { paid, owed, label }) {
+  const chId = gcfg(guildId, "paymentsDueChannelId");
+  if (!chId) return;
+  const ch = await client.channels.fetch(chId).catch(() => null);
+  if (!ch) return;
+  const roleId = gcfg(guildId, "collectionsRoleId");
+  const payer = c.type === "lease"
+    ? c.parties.find((p) => p.key === "tenant")
+    : c.parties.find((p) => p.key === "buyer");
+  await ch
+    .send({
+      content:
+        (roleId ? `<@&${roleId}> ` : "") +
+        `⚠️ **Outstanding ${label}** — contract #${c.id} (${c.type}), plot ${c.fields.plot}.\n` +
+        `Payer: <@${payer.user_id}> · Paid **${money(paid)} / ${money(owed)}** · Owing **${money(owed - paid)}**.\n` +
+        `In <#${c.channel_id}>.`,
+      allowedMentions: { roles: roleId ? [roleId] : [] },
+    })
+    .catch(() => {});
 }
 
 // Split a verified weekly rent payment: pay landlord + realtor, company keeps rest.
@@ -686,8 +727,17 @@ async function checkRecurringRent() {
       continue;
     }
     if (c.next_rent_at && now >= c.next_rent_at) {
+      // Was the week that's ending paid in full? If not, flag it as overdue.
+      if ((c.last_rent_paid_week || 0) < c.rent_week) {
+        await alertArrears(c, c.guild_id, {
+          paid: c.week_paid || 0,
+          owed: Number(c.fields.rent) || 0,
+          label: `Week ${c.rent_week} rent (overdue)`,
+        });
+      }
       c.rent_week = (c.rent_week || 1) + 1;
       c.current_rent_code = newMemoCode();
+      c.week_paid = 0;
       c.next_rent_at = now + WEEK_MS;
       store.saveContract();
       const ch = await client.channels.fetch(c.channel_id).catch(() => null);
@@ -768,17 +818,20 @@ async function completeDeal(i) {
   const sellerIgn = c.fields.seller_ign;
   const realtorIgn = c.fields.realtor_ign;
 
-  // 1) Confirm the buyer's escrow payment landed (unless the seller was already
-  //    paid on a prior partial run).
+  // 1) Confirm the buyer has paid IN FULL (summing any installments), unless the
+  //    seller was already paid on a prior partial run.
   if (!c.sellerPaid) {
-    const pay = await findVerificationPayment(c.payment_code, price);
-    if (!pay.ok) {
-      return i.editReply(`Couldn't reach the economy API (\`${pay.error}\`). Try again shortly.`);
+    const sum = await sumPaymentsWithMemo(c.payment_code);
+    if (!sum.ok) {
+      return i.editReply(`Couldn't reach the economy API (\`${sum.error}\`). Try again shortly.`);
     }
-    if (!pay.found) {
+    c.amount_paid = sum.total;
+    store.saveContract();
+    if (sum.total < price) {
+      await alertArrears(c, i.guild.id, { paid: sum.total, owed: price, label: "Purchase" });
       return i.editReply(
-        `I haven't seen the buyer's payment of ${money(price)} with memo \`${c.payment_code}\` yet. ` +
-          "Once they've paid the firm, run this again."
+        `The buyer has only paid **${money(sum.total)} / ${money(price)}** (memo \`${c.payment_code}\`). ` +
+          "Release is blocked until it's paid in full."
       );
     }
   }
@@ -1077,14 +1130,12 @@ async function panelContracts(i) {
     .sort((a, b) => b.created_at - a.created_at)
     .slice(0, 10);
   if (!all.length) return i.reply({ content: "No contracts on file yet.", ephemeral: true });
-  const icon = (s) => (s === "signed" ? "✅" : s === "void" ? "🚫" : "🖊️");
-  const lines = all.map(
-    (c) => `${icon(c.status)} **#${c.id}** ${c.type} — ${c.parties.map((p) => p.name).join(", ")} — plot ${c.fields.plot}`
+  await i.deferReply({ ephemeral: true });
+  await refreshPaidFromLedger(all); // live payment totals (one API call)
+  const lines = all.map(contractLine);
+  return i.editReply(
+    "**Recent contracts:**\n" + lines.join("\n").slice(0, 1800) + "\n\nUse `!contract <id>` to re-pull a PDF."
   );
-  return i.reply({
-    content: "**Recent contracts:**\n" + lines.join("\n").slice(0, 1800) + "\n\nUse `!contract <id>` to re-pull a PDF.",
-    ephemeral: true,
-  });
 }
 
 async function panelPostDesk(i) {
@@ -1315,6 +1366,42 @@ const contractSearchText = (c) =>
     .join(" ")
     .toLowerCase();
 
+const statusIcon = (s) => (s === "signed" ? "✅" : s === "void" ? "🚫" : "🖊️");
+
+// Refresh paid totals for a set of contracts from the ledger (one API call).
+async function refreshPaidFromLedger(contracts) {
+  if (!dealEnabled() || !contracts.length) return;
+  const r = await fetchLedger();
+  if (!r.ok) return;
+  let changed = false;
+  for (const c of contracts) {
+    if (c.type === "purchase" && c.payment_code) {
+      const t = sumInLedger(r.items, c.payment_code);
+      if (c.amount_paid !== t) { c.amount_paid = t; changed = true; }
+    } else if (c.type === "lease" && c.current_rent_code) {
+      const t = sumInLedger(r.items, c.current_rent_code);
+      if (c.week_paid !== t) { c.week_paid = t; changed = true; }
+    }
+  }
+  if (changed) store.saveContract();
+}
+
+// One-line summary of a contract, with payment progress.
+function contractLine(c) {
+  const names = c.parties.map((p) => p.name).join(", ");
+  let amt;
+  if (c.type === "lease") {
+    const rent = Number(c.fields.rent) || 0;
+    amt = `rent ${money(rent)}/wk · wk ${c.rent_week || 1}: ${money(c.week_paid || 0)}/${money(rent)}`;
+  } else if (c.type === "seller") {
+    amt = `listed at ${c.fields.price}`;
+  } else {
+    const price = parseAmount(c.fields.price);
+    amt = `paid ${money(c.amount_paid || 0)}/${money(price)}`;
+  }
+  return `${statusIcon(c.status)} **#${c.id}** ${c.type} — ${names} — plot ${c.fields.plot} · ${amt}`;
+}
+
 async function handleContractList(msg, rest) {
   if (!isStaff(msg.member, msg.guild.id)) {
     return msg.reply("Only realtors or managers can look up contracts.");
@@ -1345,11 +1432,9 @@ async function handleContractList(msg, rest) {
   }
   if (!results.length) return msg.reply("No matching contracts.");
 
-  const icon = (s) => (s === "signed" ? "✅" : s === "void" ? "🚫" : "🖊️");
-  const lines = results.slice(0, 15).map((c) => {
-    const names = c.parties.map((p) => p.name).join(", ");
-    return `${icon(c.status)} **#${c.id}** ${c.type} — ${names} — plot ${c.fields.plot} (${c.fields.price})`;
-  });
+  const shown = results.slice(0, 15);
+  await refreshPaidFromLedger(shown); // live payment totals (one API call)
+  const lines = shown.map(contractLine);
   return msg.reply(
     `**${label}** (${results.length} found)\n` +
       lines.join("\n").slice(0, 1800) +

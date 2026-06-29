@@ -16,7 +16,25 @@ anti-spam.
 7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract)
 8. ✅ **Contractors** — apply → approve → advertise
 9. ✅ **Panel update + `/panel`** — Buy/Sell/Rent/Contractors + staff control panel
-10. ✅ **Anti-spam / AutoMod** — invite/spam blocking + raid guard *(this build)*
+10. ✅ **Anti-spam / AutoMod** — invite/spam blocking + raid guard
+11. ✅ **Partial payments + arrears** — installments, paid display, collections alerts *(this build)*
+
+## Partial payments + arrears (Milestone 12)
+
+Payments now **sum all installments** carrying the memo, so buyers/tenants can
+pay in parts. **Check payment** reports progress (e.g. `paid $30,000 / $50,000,
+$20,000 remaining`); a sale only releases (`/complete-deal`) once the total is
+reached, and a week's rent only escrows once fully paid.
+
+`!contracts` and `/panel → Recent contracts` show **live** payment status —
+`paid $X/$Y` for sales, `rent $R/wk · wk N: $X/$Y` for leases (and the old lease
+"(undefined)" is fixed). The totals are re-summed straight from the ledger each
+time (one API call fetches the firm's transactions and sums every contract's
+memo locally), so they're always current.
+
+**Arrears alerts:** when a payment is short — on a check, on `/complete-deal`, or
+when a rent week rolls over unpaid — the bot pings the **Collections** role in a
+new **#payments-due** channel with who owes what.
 
 ## Anti-spam / AutoMod (Milestone 11)
 
