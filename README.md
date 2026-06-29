@@ -10,9 +10,29 @@ anti-spam.
 1. ✅ **Tickets** — Buy/Sell panel → private channel with Realtor/Manager roles → close
 2. ✅ **Contracts** — Seller's & Purchase agreements, click-to-sign, PDF export
 3. ✅ **IGN verification** — micropayment + memo proof, gates the Client Desk
-4. ✅ **Contract archive / lookup** — search past contracts, re-pull PDFs *(this build)*
-5. ⏳ DC economy / commission tracking
+4. ✅ **Contract archive / lookup** — search past contracts, re-pull PDFs
+5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission *(this build)*
 6. ⏳ Anti-spam / automod
+
+## Escrow / autopay (Milestone 5)
+
+When a **purchase agreement** is fully signed (and `DC_API_TOKEN` +
+`VERIFY_ACCOUNT_ID` are set), the bot posts payment instructions: the **buyer
+pays the firm the full price** in-game with a unique memo.
+
+Once the plot has been transferred, a realtor/manager runs
+**`/complete-deal contract:<id>`**. The bot:
+
+1. **Verifies** the firm actually received the buyer's payment (memo-matched).
+2. Pays the **seller** their proceeds (`price − commission`) → seller's IGN.
+3. Pays the **realtor** their share of the commission (default **50%**, set via
+   `config.deal.realtorCommissionShare`) → realtor's IGN.
+4. The **company keeps the remaining commission** in the firm account.
+
+It only pays out on a confirmed payment, uses idempotency keys, and is safely
+re-runnable — if one transfer fails, re-running pays only what's still owed
+(no double-paying). Payouts are debited from `DC_FROM_ACCOUNT_ID` (defaults to
+`VERIFY_ACCOUNT_ID`). IGNs come from each party's verified link.
 
 ## Contract lookup (Milestone 4)
 

@@ -47,6 +47,17 @@ export const config = {
     specialDefault: "None.",
   },
 
+  // --- Escrow / autopay -----------------------------------------------------
+  // After a purchase agreement is signed, the buyer pays the firm the full
+  // price (memo-matched). On /complete-deal, the firm pays the seller
+  // (price - commission) and the realtor their share of the commission; the
+  // company keeps the remainder in the firm account.
+  deal: {
+    realtorCommissionShare: 0.5, // realtor's fraction of the commission (rest = company)
+    // The command the BUYER runs to pay the firm. {firm}/{amount}/{memo} filled in.
+    payCommandTemplate: "/pay-account business {firm} {amount} {memo}",
+  },
+
   // Shown at the top of each new ticket.
   buyWelcome:
     "Thanks for reaching out! A realtor will be with you shortly. To help us " +

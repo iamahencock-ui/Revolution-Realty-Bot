@@ -35,6 +35,8 @@ import {
   verifyEnabled,
   newMemoCode,
   findVerificationPayment,
+  dealEnabled,
+  payToPlayer,
 } from "./verify.js";
 
 const { DISCORD_TOKEN } = process.env;
@@ -100,7 +102,16 @@ const purchaseCmd = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("special").setDescription("Special requirements").setRequired(false))
   .addStringOption((o) => o.setName("commission").setDescription("Commission (default 10%)").setRequired(false));
 
-const SLASH_COMMANDS = [sellerCmd.toJSON(), purchaseCmd.toJSON()];
+const completeDealCmd = new SlashCommandBuilder()
+  .setName("complete-deal")
+  .setDescription("Confirm a plot transfer and release escrow + commission")
+  .addIntegerOption((o) => o.setName("contract").setDescription("Contract # to complete").setRequired(true));
+
+const SLASH_COMMANDS = [
+  sellerCmd.toJSON(),
+  purchaseCmd.toJSON(),
+  completeDealCmd.toJSON(),
+];
 
 async function registerCommands(guild) {
   await guild.commands.set(SLASH_COMMANDS).catch((e) =>
@@ -129,6 +140,7 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isChatInputCommand()) {
       if (i.commandName === "seller-agreement") return issueContract(i, "seller");
       if (i.commandName === "purchase-agreement") return issueContract(i, "purchase");
+      if (i.commandName === "complete-deal") return completeDeal(i);
       return;
     }
     if (i.isButton()) {
@@ -162,6 +174,27 @@ async function issueContract(i, type) {
   }
 
   const o = i.options;
+
+  // Validate the chosen parties before anything else.
+  const sellerUser = o.getUser("seller");
+  const buyerUser = type === "purchase" ? o.getUser("buyer") : null;
+  const botParty = [sellerUser, buyerUser].find((u) => u && u.bot);
+  if (botParty) {
+    return i.reply({
+      content: `You can't pick a bot (**${botParty.username}**) as a party — choose the real player.`,
+      ephemeral: true,
+    });
+  }
+  if (buyerUser && buyerUser.id === sellerUser.id) {
+    return i.reply({
+      content: "Buyer and seller can't be the same person.",
+      ephemeral: true,
+    });
+  }
+
+  // Acknowledge immediately so the interaction never times out.
+  await i.deferReply();
+
   const c = config.contract;
   const realtorName = displayName(i.member, i.user);
   const date = todayISO();
@@ -169,7 +202,6 @@ async function issueContract(i, type) {
   let fields, parties;
 
   if (type === "seller") {
-    const sellerUser = o.getUser("seller");
     const sellerMember = await i.guild.members.fetch(sellerUser.id).catch(() => null);
     const sellerName = displayName(sellerMember, sellerUser);
     const termDays = o.getInteger("term_days") ?? c.termDaysDefault;
@@ -191,8 +223,6 @@ async function issueContract(i, type) {
       { key: "realtor", label: "Realtor", user_id: i.user.id, name: realtorName, signed_at: null },
     ];
   } else {
-    const buyerUser = o.getUser("buyer");
-    const sellerUser = o.getUser("seller");
     const buyerMember = await i.guild.members.fetch(buyerUser.id).catch(() => null);
     const sellerMember = await i.guild.members.fetch(sellerUser.id).catch(() => null);
     const buyerName = displayName(buyerMember, buyerUser);
@@ -231,12 +261,11 @@ async function issueContract(i, type) {
   });
 
   const pings = parties.map((p) => `<@${p.user_id}>`).join(" ");
-  const message = await i.reply({
+  const message = await i.editReply({
     content: `${pings} — please review and **Sign** the agreement below.`,
     embeds: [contractEmbed(contract)],
     components: [contractButtons(contract)],
     allowedMentions: { users: parties.map((p) => p.user_id) },
-    fetchReply: true,
   });
   contract.message_id = message.id;
   store.saveContract();
@@ -279,6 +308,29 @@ async function signContract(i) {
         files: [att2],
       }).catch(() => {});
     }
+
+    // Purchase agreement + escrow on → tell the buyer how to pay the firm.
+    if (contract.type === "purchase" && dealEnabled()) {
+      const code = newMemoCode();
+      contract.payment_code = code;
+      store.saveContract();
+      const buyer = contract.parties.find((p) => p.key === "buyer");
+      const priceNum = parseAmount(contract.fields.price);
+      const payCmd = config.deal.payCommandTemplate
+        .replace("{firm}", config.verify.firmName)
+        .replace("{amount}", String(priceNum))
+        .replace("{memo}", code);
+      await i.channel
+        .send({
+          content:
+            `<@${buyer.user_id}> 💳 To complete the purchase, pay the firm the full price in-game:\n` +
+            "```\n" + payCmd + "\n```" +
+            `Memo must be exactly: \`${code}\`\n` +
+            `Once paid, a realtor will run \`/complete-deal contract:${contract.id}\` to release funds.`,
+          allowedMentions: { users: [buyer.user_id] },
+        })
+        .catch(() => {});
+    }
   }
 }
 
@@ -301,6 +353,116 @@ async function voidContract(i) {
     embeds: [contractEmbed(contract)],
     components: [contractButtons(contract)],
   });
+}
+
+// ===========================================================================
+// Escrow / autopay
+// ===========================================================================
+const parseAmount = (s) => Number(String(s ?? "").replace(/[^0-9.]/g, "")) || 0;
+const money = (n) => `$${Number(n).toFixed(2)}`;
+
+function commissionAmount(price, commissionStr) {
+  const s = String(commissionStr ?? "").trim();
+  if (s.endsWith("%")) return price * (parseAmount(s) / 100);
+  return parseAmount(s);
+}
+
+async function completeDeal(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Only realtors or managers can complete deals.", ephemeral: true });
+  }
+  const id = i.options.getInteger("contract");
+  const c = store.getContract(id);
+  if (!c || c.guild_id !== i.guild.id) {
+    return i.reply({ content: `No contract #${id} on file.`, ephemeral: true });
+  }
+  if (c.type !== "purchase") {
+    return i.reply({ content: "Only purchase agreements can be completed.", ephemeral: true });
+  }
+  if (c.status !== "signed") {
+    return i.reply({ content: "That contract isn't fully signed yet.", ephemeral: true });
+  }
+  if (c.completed) {
+    return i.reply({ content: `Deal #${id} is already completed.`, ephemeral: true });
+  }
+  if (!dealEnabled()) {
+    return i.reply({ content: "Autopay isn't configured (`DC_API_TOKEN` / `VERIFY_ACCOUNT_ID`).", ephemeral: true });
+  }
+  if (!c.payment_code) {
+    return i.reply({ content: "No payment code on this contract — was it issued before autopay was enabled?", ephemeral: true });
+  }
+
+  await i.deferReply();
+
+  const price = parseAmount(c.fields.price);
+  const commission = commissionAmount(price, c.fields.commission);
+  const sellerProceeds = Math.max(0, price - commission);
+  const realtorCut = commission * config.deal.realtorCommissionShare;
+  const companyCut = commission - realtorCut;
+  const sellerIgn = c.fields.seller_ign;
+  const realtorIgn = c.fields.realtor_ign;
+
+  // 1) Confirm the buyer's escrow payment landed (unless the seller was already
+  //    paid on a prior partial run).
+  if (!c.sellerPaid) {
+    const pay = await findVerificationPayment(c.payment_code, price);
+    if (!pay.ok) {
+      return i.editReply(`Couldn't reach the economy API (\`${pay.error}\`). Try again shortly.`);
+    }
+    if (!pay.found) {
+      return i.editReply(
+        `I haven't seen the buyer's payment of ${money(price)} with memo \`${c.payment_code}\` yet. ` +
+          "Once they've paid the firm, run this again."
+      );
+    }
+  }
+
+  const results = [];
+
+  // 2) Pay the seller their proceeds (skip if already done).
+  if (!c.sellerPaid) {
+    const r = await payToPlayer(sellerIgn, sellerProceeds, `Plot sale proceeds — contract #${id}`);
+    if (r.ok) {
+      c.sellerPaid = true;
+      store.saveContract();
+    }
+    results.push(["Seller proceeds", sellerIgn, sellerProceeds, r]);
+    if (!r.ok) {
+      return i.editReply(payoutSummary(id, price, results) + "\n⚠️ Seller payout failed — nothing else was paid. Fix and re-run.");
+    }
+  }
+
+  // 3) Pay the realtor their commission share (skip if already done / zero).
+  if (!c.realtorPaid && realtorCut > 0) {
+    const r = await payToPlayer(realtorIgn, realtorCut, `Commission — contract #${id}`);
+    if (r.ok) {
+      c.realtorPaid = true;
+      store.saveContract();
+    }
+    results.push(["Realtor commission", realtorIgn, realtorCut, r]);
+  }
+
+  // 4) Finalize.
+  c.completed = c.sellerPaid && (c.realtorPaid || realtorCut <= 0);
+  c.payouts = { price, commission, sellerProceeds, realtorCut, companyCut, at: Date.now() };
+  store.saveContract();
+
+  const tail =
+    `\n• Company keeps: ${money(companyCut)} (stays in firm account)` +
+    (c.completed ? `\n✅ **Deal #${id} complete.**` : "\n⚠️ Some payouts pending — re-run to retry.");
+  return i.editReply(payoutSummary(id, price, results) + tail);
+}
+
+function payoutSummary(id, price, results) {
+  const lines = [`**Deal #${id} — plot transfer confirmed.** Buyer paid ${money(price)}.`];
+  for (const [label, ign, amt, r] of results) {
+    lines.push(
+      r.ok
+        ? `• ${label} (${ign}): ${money(amt)} ✅${r.txnId ? ` (txn #${r.txnId})` : ""}`
+        : `• ${label} (${ign}): ${money(amt)} ❌ \`${r.error}\`${r.message ? ` — ${r.message}` : ""}`
+    );
+  }
+  return lines.join("\n");
 }
 
 async function openTicket(i, type) {
@@ -638,6 +800,7 @@ async function handleHelp(msg) {
       "`/seller-agreement` — exclusive listing agreement (seller + realtor sign)",
       "`/purchase-agreement` — purchase agreement (buyer + seller + realtor sign)",
       "Parties click **Sign**; once all have signed, a PDF record is posted and archived.",
+      "`/complete-deal contract:<id>` — after the buyer pays the firm, confirm transfer and auto-release seller proceeds + commission",
       "",
       "**Look up past contracts:**",
       `\`${config.prefix}contracts\` — recent contracts (add \`@user\`, a status \`pending/signed/void\`, or a plot/name to filter)`,

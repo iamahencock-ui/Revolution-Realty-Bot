@@ -10,9 +10,18 @@ import crypto from "node:crypto";
 const BASE = process.env.DC_API_BASE || "https://api.democracycraft.net/economy";
 const TOKEN = () => process.env.DC_API_TOKEN || null;
 const VERIFY_ACCOUNT_ID = () => process.env.VERIFY_ACCOUNT_ID || null;
+// Account payouts are debited from. Defaults to the same firm account that
+// receives verification/escrow payments.
+const FROM_ACCOUNT_ID = () =>
+  process.env.DC_FROM_ACCOUNT_ID || process.env.VERIFY_ACCOUNT_ID || null;
 
 export function verifyEnabled() {
   return !!(TOKEN() && VERIFY_ACCOUNT_ID());
+}
+
+// Escrow/autopay needs both a token and an account to pay from.
+export function dealEnabled() {
+  return !!(TOKEN() && FROM_ACCOUNT_ID());
 }
 
 // A 32-char alphanumeric memo (no symbols, so DC can't strip/mangle it).
@@ -45,11 +54,11 @@ async function ignForUuid(uuid) {
 
 // Look for a received payment carrying `code` in its memo/message.
 // Returns { ok, found, ign, uuid, txnId, amount } or an error.
-export async function findVerificationPayment(code, minAmount = 0.01) {
+export async function findVerificationPayment(code, minAmount = 0.01, limit = 100) {
   const acct = VERIFY_ACCOUNT_ID();
   if (!acct) return { ok: false, error: "NO_ACCOUNT" };
 
-  const r = await apiGet(`/api/v1/accounts/${acct}/transactions?limit=50`);
+  const r = await apiGet(`/api/v1/accounts/${acct}/transactions?limit=${limit}`);
   if (!r.ok) return r;
 
   const items = r.data.items || [];
@@ -72,4 +81,36 @@ export async function findVerificationPayment(code, minAmount = 0.01) {
     txnId: match.txnId,
     amount: match.amount,
   };
+}
+
+// Send a payment to a player by IGN (firm account -> player). Money is a
+// decimal string; idempotency key makes retries safe.
+export async function payToPlayer(playerName, amount, memo) {
+  const jwt = TOKEN();
+  if (!jwt) return { ok: false, error: "NO_TOKEN" };
+  const body = {
+    toPlayerName: playerName,
+    amount: Number(amount).toFixed(2),
+    memo: memo || "Revolution Realty payout",
+  };
+  const from = FROM_ACCOUNT_ID();
+  if (from) body.fromAccountId = Number(from);
+
+  let res;
+  try {
+    res = await fetch(`${BASE}/api/v1/transfers/to-player`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": crypto.randomUUID(),
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    return { ok: false, error: "NETWORK", message: e.message };
+  }
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) return { ok: true, txnId: data.txnId };
+  return { ok: false, status: res.status, error: data.error || `HTTP_${res.status}`, message: data.message || "" };
 }
