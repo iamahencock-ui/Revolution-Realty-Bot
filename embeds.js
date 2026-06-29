@@ -74,6 +74,7 @@ export function helpEmbed(isStaff, verifyOn) {
       value: [
         "`/seller-agreement` — issue an exclusive listing agreement",
         "`/purchase-agreement` — issue a purchase agreement",
+        "`/lease-agreement` — issue a lease / rental agreement",
         "`/complete-deal contract:<id>` — confirm transfer → release escrow + commission",
         "`/list` — post a plot listing to a category forum",
         "`!contracts` / `!contract <id>` — look up past contracts",

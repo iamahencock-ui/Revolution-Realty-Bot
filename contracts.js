@@ -77,10 +77,40 @@ function purchaseBody(f) {
   ];
 }
 
+function leaseBody(f) {
+  return [
+    "**REVOLUTION REALTY — LEASE / RENTAL AGREEMENT**",
+    "",
+    `**Effective date:** ${f.date}`,
+    `**Term:** ${f.term}`,
+    "",
+    "**Parties**",
+    `• Landlord: ${f.landlord} (IGN: ${f.landlord_ign})`,
+    `• Tenant: ${f.tenant} (IGN: ${f.tenant_ign})`,
+    `• Realtor: ${f.realtor} (IGN: ${f.realtor_ign}), of Revolution Realty`,
+    "",
+    "**Property**",
+    `• Plot: ${f.plot}`,
+    `• Description: ${f.plot_desc}`,
+    `• Rent: ${f.rent}`,
+    `• Security deposit: ${f.deposit}`,
+    "",
+    "**Terms & Conditions**",
+    "1. Lease. The Landlord leases the Property to the Tenant for the Term at the stated Rent.",
+    `2. Rent. The Tenant shall pay ${f.rent} for the duration of the Term. Repeated late or missed payments may end the lease.`,
+    `3. Deposit. The Tenant pays a security deposit of ${f.deposit}, refundable at the end of the Term less any damages or unpaid rent.`,
+    "4. Use. The Tenant will use the Property responsibly and per DemocracyCraft rules, with no unauthorised building changes without the Landlord's consent.",
+    `5. Commission. Revolution Realty's commission of ${f.commission} applies per the arrangement with the Landlord.`,
+    "6. Termination. The lease expires at the end of the Term unless renewed in writing; either party may end it early per agreed terms.",
+    `7. Special requirements. ${f.special}`,
+    "8. Entire agreement. Changes must be agreed by all parties here and re-signed.",
+  ];
+}
+
 function bodyLines(contract) {
-  return contract.type === "seller"
-    ? sellerBody(contract.fields)
-    : purchaseBody(contract.fields);
+  if (contract.type === "seller") return sellerBody(contract.fields);
+  if (contract.type === "lease") return leaseBody(contract.fields);
+  return purchaseBody(contract.fields);
 }
 
 function signatureLines(contract) {
@@ -182,7 +212,11 @@ export function buildPdf(contract) {
 export async function pdfAttachment(contract) {
   const buf = await buildPdf(contract);
   const safe =
-    contract.type === "seller" ? "listing-agreement" : "purchase-agreement";
+    contract.type === "seller"
+      ? "listing-agreement"
+      : contract.type === "lease"
+      ? "lease-agreement"
+      : "purchase-agreement";
   return new AttachmentBuilder(buf, {
     name: `${safe}-contract-${contract.id}.pdf`,
   });

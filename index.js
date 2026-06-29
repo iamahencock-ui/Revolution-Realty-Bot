@@ -105,6 +105,19 @@ const purchaseCmd = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("special").setDescription("Special requirements").setRequired(false))
   .addStringOption((o) => o.setName("commission").setDescription("Commission (default 10%)").setRequired(false));
 
+const leaseCmd = new SlashCommandBuilder()
+  .setName("lease-agreement")
+  .setDescription("Issue a lease / rental agreement here")
+  .addUserOption((o) => o.setName("landlord").setDescription("The landlord (property owner)").setRequired(true))
+  .addUserOption((o) => o.setName("tenant").setDescription("The tenant (renter)").setRequired(true))
+  .addStringOption((o) => o.setName("plot").setDescription("Plot number / /gps").setRequired(true))
+  .addStringOption((o) => o.setName("rent").setDescription("Rent (e.g. 500/week)").setRequired(true))
+  .addStringOption((o) => o.setName("term").setDescription("Lease term (e.g. 4 weeks; default 4 weeks)").setRequired(false))
+  .addStringOption((o) => o.setName("deposit").setDescription("Security deposit").setRequired(false))
+  .addStringOption((o) => o.setName("description").setDescription("Property description").setRequired(false))
+  .addStringOption((o) => o.setName("commission").setDescription("Commission (default 10%)").setRequired(false))
+  .addStringOption((o) => o.setName("special").setDescription("Special requirements").setRequired(false));
+
 const completeDealCmd = new SlashCommandBuilder()
   .setName("complete-deal")
   .setDescription("Confirm a plot transfer and release escrow + commission")
@@ -134,6 +147,7 @@ const helpCmd = new SlashCommandBuilder()
 const SLASH_COMMANDS = [
   sellerCmd.toJSON(),
   purchaseCmd.toJSON(),
+  leaseCmd.toJSON(),
   completeDealCmd.toJSON(),
   listCmd.toJSON(),
   helpCmd.toJSON(),
@@ -166,6 +180,7 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isChatInputCommand()) {
       if (i.commandName === "seller-agreement") await issueContract(i, "seller");
       else if (i.commandName === "purchase-agreement") await issueContract(i, "purchase");
+      else if (i.commandName === "lease-agreement") await issueContract(i, "lease");
       else if (i.commandName === "complete-deal") await completeDeal(i);
       else if (i.commandName === "list") await handleList(i);
       else if (i.commandName === "help") {
@@ -213,20 +228,36 @@ async function issueContract(i, type) {
   }
 
   const o = i.options;
+  const c = config.contract;
 
-  // Validate the chosen parties before anything else.
-  const sellerUser = o.getUser("seller");
-  const buyerUser = type === "purchase" ? o.getUser("buyer") : null;
-  const botParty = [sellerUser, buyerUser].find((u) => u && u.bot);
+  // Which client-side parties each contract type collects (realtor is added
+  // automatically as the issuer).
+  const partySpec =
+    type === "seller"
+      ? [{ key: "seller", label: "Seller", opt: "seller" }]
+      : type === "lease"
+      ? [
+          { key: "landlord", label: "Landlord", opt: "landlord" },
+          { key: "tenant", label: "Tenant", opt: "tenant" },
+        ]
+      : [
+          { key: "buyer", label: "Buyer", opt: "buyer" },
+          { key: "seller", label: "Seller", opt: "seller" },
+        ];
+
+  // Resolve + validate the chosen users.
+  const chosen = partySpec.map((p) => ({ ...p, user: o.getUser(p.opt) }));
+  const botParty = chosen.find((p) => p.user?.bot);
   if (botParty) {
     return i.reply({
-      content: `You can't pick a bot (**${botParty.username}**) as a party — choose the real player.`,
+      content: `You can't pick a bot (**${botParty.user.username}**) as the ${botParty.label.toLowerCase()} — choose the real player.`,
       ephemeral: true,
     });
   }
-  if (buyerUser && buyerUser.id === sellerUser.id) {
+  const ids = chosen.map((p) => p.user.id);
+  if (new Set(ids).size !== ids.length) {
     return i.reply({
-      content: "Buyer and seller can't be the same person.",
+      content: "The same person can't fill two of these roles.",
       ephemeral: true,
     });
   }
@@ -234,22 +265,25 @@ async function issueContract(i, type) {
   // Acknowledge immediately so the interaction never times out.
   await i.deferReply();
 
-  const c = config.contract;
   const realtorName = displayName(i.member, i.user);
   const date = todayISO();
 
-  let fields, parties;
+  // Resolve display names for each chosen user.
+  for (const p of chosen) {
+    const m = await i.guild.members.fetch(p.user.id).catch(() => null);
+    p.name = displayName(m, p.user);
+  }
+  const by = (key) => chosen.find((p) => p.key === key);
 
+  let fields;
   if (type === "seller") {
-    const sellerMember = await i.guild.members.fetch(sellerUser.id).catch(() => null);
-    const sellerName = displayName(sellerMember, sellerUser);
     const termDays = o.getInteger("term_days") ?? c.termDaysDefault;
     fields = {
       date,
       term_days: termDays,
       expiry_date: plusDaysISO(termDays),
-      seller: sellerName,
-      seller_ign: linkedIgn(sellerUser.id),
+      seller: by("seller").name,
+      seller_ign: linkedIgn(by("seller").user.id),
       realtor: realtorName,
       realtor_ign: linkedIgn(i.user.id),
       plot: o.getString("plot"),
@@ -257,21 +291,30 @@ async function issueContract(i, type) {
       price: o.getString("price"),
       commission: o.getString("commission") ?? c.commissionDefault,
     };
-    parties = [
-      { key: "seller", label: "Seller", user_id: sellerUser.id, name: sellerName, signed_at: null },
-      { key: "realtor", label: "Realtor", user_id: i.user.id, name: realtorName, signed_at: null },
-    ];
-  } else {
-    const buyerMember = await i.guild.members.fetch(buyerUser.id).catch(() => null);
-    const sellerMember = await i.guild.members.fetch(sellerUser.id).catch(() => null);
-    const buyerName = displayName(buyerMember, buyerUser);
-    const sellerName = displayName(sellerMember, sellerUser);
+  } else if (type === "lease") {
     fields = {
       date,
-      buyer: buyerName,
-      buyer_ign: linkedIgn(buyerUser.id),
-      seller: sellerName,
-      seller_ign: linkedIgn(sellerUser.id),
+      term: o.getString("term") ?? c.leaseTermDefault,
+      landlord: by("landlord").name,
+      landlord_ign: linkedIgn(by("landlord").user.id),
+      tenant: by("tenant").name,
+      tenant_ign: linkedIgn(by("tenant").user.id),
+      realtor: realtorName,
+      realtor_ign: linkedIgn(i.user.id),
+      plot: o.getString("plot"),
+      plot_desc: o.getString("description") ?? "—",
+      rent: o.getString("rent"),
+      deposit: o.getString("deposit") ?? c.depositDefault,
+      commission: o.getString("commission") ?? c.commissionDefault,
+      special: o.getString("special") ?? c.specialDefault,
+    };
+  } else {
+    fields = {
+      date,
+      buyer: by("buyer").name,
+      buyer_ign: linkedIgn(by("buyer").user.id),
+      seller: by("seller").name,
+      seller_ign: linkedIgn(by("seller").user.id),
       realtor: realtorName,
       realtor_ign: linkedIgn(i.user.id),
       plot: o.getString("plot"),
@@ -281,12 +324,18 @@ async function issueContract(i, type) {
       special: o.getString("special") ?? c.specialDefault,
       commission: o.getString("commission") ?? c.commissionDefault,
     };
-    parties = [
-      { key: "buyer", label: "Buyer", user_id: buyerUser.id, name: buyerName, signed_at: null },
-      { key: "seller", label: "Seller", user_id: sellerUser.id, name: sellerName, signed_at: null },
-      { key: "realtor", label: "Realtor", user_id: i.user.id, name: realtorName, signed_at: null },
-    ];
   }
+
+  const parties = [
+    ...chosen.map((p) => ({
+      key: p.key,
+      label: p.label,
+      user_id: p.user.id,
+      name: p.name,
+      signed_at: null,
+    })),
+    { key: "realtor", label: "Realtor", user_id: i.user.id, name: realtorName, signed_at: null },
+  ];
 
   const contract = store.createContract({
     guild_id: i.guild.id,
@@ -921,6 +970,7 @@ async function handleHelp(msg) {
       "**Realtors/managers — issue a contract (slash commands):**",
       "`/seller-agreement` — exclusive listing agreement (seller + realtor sign)",
       "`/purchase-agreement` — purchase agreement (buyer + seller + realtor sign)",
+      "`/lease-agreement` — lease / rental agreement (landlord + tenant + realtor sign)",
       "Parties click **Sign**; once all have signed, a PDF record is posted and archived.",
       "`/complete-deal contract:<id>` — after the buyer pays the firm, confirm transfer and auto-release seller proceeds + commission",
       "`/list` — post a plot listing (category, sale/rent, plot, price, image) to the category forum",

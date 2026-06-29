@@ -12,11 +12,18 @@ anti-spam.
 3. ✅ **IGN verification** — micropayment + memo proof, gates the Client Desk
 4. ✅ **Contract archive / lookup** — search past contracts, re-pull PDFs
 5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission
-6. ✅ **Listings** — category forum channels + `/list` *(this build)*
-7. ⏳ Lease Agreement contract type
+6. ✅ **Listings** — category forum channels + `/list`
+7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract) *(this build)*
 8. ⏳ Contractor application + advertising
 9. ⏳ Panel update (Buy/Sell/Rent/Find Contractors)
 10. ⏳ Anti-spam / automod
+
+## Lease Agreement (Milestone 7)
+
+`/lease-agreement` issues a rental contract — **landlord + tenant + realtor**
+all sign. Fields: plot, rent (e.g. `500/week`), term (default 4 weeks),
+security deposit, description, commission, special requirements. Same
+sign-in-place embed + PDF record + archive flow as the sale/purchase contracts.
 
 ## Listings (Milestone 6)
 

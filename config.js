@@ -45,6 +45,8 @@ export const config = {
     termDaysDefault: 30,
     paymentTermsDefault: "Full payment on transfer of the plot.",
     specialDefault: "None.",
+    leaseTermDefault: "4 weeks",
+    depositDefault: "None.",
   },
 
   // --- Listings -------------------------------------------------------------
