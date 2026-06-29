@@ -164,12 +164,12 @@ client.on(Events.GuildCreate, async (guild) => {
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) {
-      if (i.commandName === "seller-agreement") return issueContract(i, "seller");
-      if (i.commandName === "purchase-agreement") return issueContract(i, "purchase");
-      if (i.commandName === "complete-deal") return completeDeal(i);
-      if (i.commandName === "list") return handleList(i);
-      if (i.commandName === "help") {
-        return i.reply({
+      if (i.commandName === "seller-agreement") await issueContract(i, "seller");
+      else if (i.commandName === "purchase-agreement") await issueContract(i, "purchase");
+      else if (i.commandName === "complete-deal") await completeDeal(i);
+      else if (i.commandName === "list") await handleList(i);
+      else if (i.commandName === "help") {
+        await i.reply({
           embeds: [helpEmbed(isStaff(i.member, i.guild.id), verifyEnabled())],
           ephemeral: true,
         });
@@ -177,16 +177,22 @@ client.on(Events.InteractionCreate, async (i) => {
       return;
     }
     if (i.isButton()) {
-      if (i.customId === "ticket_buy") return openTicket(i, "buy");
-      if (i.customId === "ticket_sell") return openTicket(i, "sell");
-      if (i.customId === "ticket_close") return closeTicketInteraction(i);
-      if (i.customId.startsWith("contract_sign_")) return signContract(i);
-      if (i.customId.startsWith("contract_void_")) return voidContract(i);
-      if (i.customId === "verify_start") return startVerification(i);
-      if (i.customId === "verify_check") return checkVerification(i);
+      if (i.customId === "ticket_buy") await openTicket(i, "buy");
+      else if (i.customId === "ticket_sell") await openTicket(i, "sell");
+      else if (i.customId === "ticket_close") await closeTicketInteraction(i);
+      else if (i.customId.startsWith("contract_sign_")) await signContract(i);
+      else if (i.customId.startsWith("contract_void_")) await voidContract(i);
+      else if (i.customId === "verify_start") await startVerification(i);
+      else if (i.customId === "verify_check") await checkVerification(i);
     }
   } catch (err) {
     console.error("interaction error:", err);
+    // Never leave an interaction hanging on "thinking…" — surface the error.
+    const note = `⚠️ Something went wrong: \`${err.message}\``;
+    try {
+      if (i.deferred || i.replied) await i.editReply(note);
+      else if (i.isRepliable?.()) await i.reply({ content: note, ephemeral: true });
+    } catch {}
   }
 });
 
