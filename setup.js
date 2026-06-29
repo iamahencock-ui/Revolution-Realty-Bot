@@ -13,6 +13,7 @@ import {
   verifyPanelButton,
 } from "./embeds.js";
 import { verifyEnabled } from "./verify.js";
+import { setupAutoMod } from "./automod.js";
 
 const V = PermissionFlagsBits.ViewChannel;
 const S = PermissionFlagsBits.SendMessages;
@@ -87,6 +88,15 @@ export async function ensureGuildSetup(guild, client) {
     cfg.contractArchiveChannelId = await mk(() =>
       guild.channels.create({
         name: "contract-archive",
+        type: ChannelType.GuildText,
+        permissionOverwrites: staffView,
+      })
+    );
+
+    // AutoMod alert log (staff-only).
+    cfg.automodLogChannelId = await mk(() =>
+      guild.channels.create({
+        name: "automod-log",
         type: ChannelType.GuildText,
         permissionOverwrites: staffView,
       })
@@ -214,6 +224,13 @@ export async function ensureGuildSetup(guild, client) {
     }
   }
 
+  // Native AutoMod rules (invite/spam/mention), exempting staff roles.
+  await setupAutoMod(
+    guild,
+    cfg.automodLogChannelId,
+    [cfg.managerRoleId, cfg.realtorRoleId, cfg.contractorRoleId]
+  ).catch((e) => console.warn("automod setup:", e.message));
+
   cfg.configured = true;
   cfg.setupAt = Date.now();
   store.setGuildConfig(guild.id, cfg);
@@ -255,6 +272,7 @@ async function notifyOwner(guild, cfg) {
         ...(cfg.verifyChannelId ? [line("Verify channel", cfg.verifyChannelId, "ch")] : []),
         line("Contractors", cfg.contractorsChannelId, "ch"),
         line("Contract archive", cfg.contractArchiveChannelId, "ch"),
+        line("AutoMod log", cfg.automodLogChannelId, "ch"),
         `• Listing forums: ${
           Object.keys(cfg.listingForums || {}).length
             ? Object.values(cfg.listingForums)

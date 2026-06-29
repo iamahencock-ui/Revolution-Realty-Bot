@@ -73,6 +73,7 @@ const ENV_FALLBACK = {
   verifiedRoleId: process.env.VERIFIED_ROLE_ID,
   contractorRoleId: process.env.CONTRACTOR_ROLE_ID,
   contractorsChannelId: process.env.CONTRACTORS_CHANNEL_ID,
+  automodLogChannelId: process.env.AUTOMOD_LOG_CHANNEL_ID,
 };
 function gcfg(guildId, key) {
   const gc = store.getGuildConfig(guildId);
@@ -97,6 +98,45 @@ function isManager(member, guildId) {
   if (member.permissions.has(PermissionFlagsBits.ManageGuild)) return true;
   const manager = gcfg(guildId, "managerRoleId");
   return manager && member.roles.cache.has(manager);
+}
+
+// --- Bot-side raid guard: same message across many channels = cross-channel
+// ad spam. Deletes the copies and times the user out. Returns true if handled.
+const recentByUser = new Map(); // userId -> [{ content, channelId, messageId, at }]
+async function raidGuard(msg) {
+  const a = config.automod;
+  if (!a.raidGuard) return false;
+  if (isStaff(msg.member, msg.guild.id)) return false;
+  const content = msg.content.trim().toLowerCase();
+  if (content.length < 8) return false;
+
+  const now = Date.now();
+  const arr = (recentByUser.get(msg.author.id) || []).filter(
+    (m) => now - m.at < a.raidWindowMs
+  );
+  arr.push({ content, channelId: msg.channel.id, messageId: msg.id, at: now });
+  recentByUser.set(msg.author.id, arr);
+
+  const same = arr.filter((m) => m.content === content);
+  const channels = new Set(same.map((m) => m.channelId));
+  if (channels.size < a.raidChannels) return false;
+
+  // Raid detected: delete all copies + time out the user.
+  for (const m of same) {
+    const ch = await client.channels.fetch(m.channelId).catch(() => null);
+    await ch?.messages?.delete(m.messageId).catch(() => {});
+  }
+  await msg.member?.timeout(a.raidTimeoutMins * 60 * 1000, "Cross-channel spam (raid guard)").catch(() => {});
+  recentByUser.delete(msg.author.id);
+
+  const logId = gcfg(msg.guild.id, "automodLogChannelId");
+  if (logId) {
+    const ch = await client.channels.fetch(logId).catch(() => null);
+    ch?.send?.(
+      `🚨 **Raid guard:** timed out <@${msg.author.id}> for posting the same message across ${channels.size} channels.`
+    ).catch(() => {});
+  }
+  return true;
 }
 
 // --- Slash commands for issuing contracts ----------------------------------
@@ -1216,6 +1256,7 @@ async function checkVerification(i) {
 client.on(Events.MessageCreate, async (msg) => {
   try {
     if (msg.author.bot || !msg.guild) return;
+    if (await raidGuard(msg)) return;
     if (!msg.content.startsWith(config.prefix)) return;
     const [cmd, ...rest] = msg.content
       .slice(config.prefix.length)

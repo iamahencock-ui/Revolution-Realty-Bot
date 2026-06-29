@@ -53,6 +53,20 @@ export const config = {
     depositDefault: "None.",
   },
 
+  // --- AutoMod / anti-spam --------------------------------------------------
+  automod: {
+    enabled: true, // create native Discord AutoMod rules on setup
+    blockInvites: true, // block discord invite links (scam-server ads)
+    mentionLimit: 6, // block messages mentioning more than this many users
+    blockSpamPreset: true, // Discord's built-in spam detection
+    // Bot-side raid guard: same message in >= N channels within the window →
+    // delete + time the user out. Catches cross-channel ad raids.
+    raidGuard: true,
+    raidChannels: 3,
+    raidWindowMs: 30000,
+    raidTimeoutMins: 60,
+  },
+
   // --- Contractors ----------------------------------------------------------
   contractor: {
     applyWelcome:

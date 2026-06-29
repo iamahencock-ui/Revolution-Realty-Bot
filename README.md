@@ -15,8 +15,27 @@ anti-spam.
 6. ✅ **Listings** — category forum channels + `/list`
 7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract)
 8. ✅ **Contractors** — apply → approve → advertise
-9. ✅ **Panel update + `/panel`** — Buy/Sell/Rent/Contractors + staff control panel *(this build)*
-10. ⏳ Anti-spam / automod
+9. ✅ **Panel update + `/panel`** — Buy/Sell/Rent/Contractors + staff control panel
+10. ✅ **Anti-spam / AutoMod** — invite/spam blocking + raid guard *(this build)*
+
+## Anti-spam / AutoMod (Milestone 11)
+
+Two layers, set up automatically:
+
+1. **Native Discord AutoMod rules** (enforced server-side, even when the bot is
+   offline) — created on setup if the bot has **Manage Server**:
+   - **Block invite links** (the scam-server ad spam summerock described)
+   - **Mention spam** (caps mass-pings)
+   - **Spam** (Discord's built-in detection)
+   Staff roles (Manager/Realtor/Contractor) are exempt; blocked messages alert an
+   **#automod-log** channel.
+2. **Bot-side raid guard** — if a user posts the **same message across 3+
+   channels** within 30s (a classic ad raid), the bot deletes every copy and
+   times the user out. Needs **Moderate Members** + **Manage Messages**.
+
+All thresholds live in `config.js → automod`. AutoMod rule creation needs the bot
+to have **Manage Server**; if it doesn't, that layer is skipped (the raid guard
+still works).
 
 ## Panel + staff control panel (Milestone 10)
 
