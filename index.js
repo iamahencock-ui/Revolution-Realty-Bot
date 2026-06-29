@@ -30,6 +30,8 @@ import {
   contractorWelcomeEmbed,
   contractorReviewButtons,
   contractorAdEmbed,
+  staffPanelEmbed,
+  staffPanelButtons,
 } from "./embeds.js";
 import {
   contractEmbed,
@@ -163,6 +165,10 @@ const contractorAdCmd = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("contact").setDescription("How to reach you (IGN / Discord)").setRequired(false))
   .addAttachmentOption((o) => o.setName("image").setDescription("A logo or showcase image").setRequired(false));
 
+const panelCmd = new SlashCommandBuilder()
+  .setName("panel")
+  .setDescription("Open your realtor/manager control panel");
+
 const helpCmd = new SlashCommandBuilder()
   .setName("help")
   .setDescription("How to use the Revolution Realty bot");
@@ -174,6 +180,7 @@ const SLASH_COMMANDS = [
   completeDealCmd.toJSON(),
   listCmd.toJSON(),
   contractorAdCmd.toJSON(),
+  panelCmd.toJSON(),
   helpCmd.toJSON(),
 ];
 
@@ -211,6 +218,7 @@ client.on(Events.InteractionCreate, async (i) => {
       else if (i.commandName === "complete-deal") await completeDeal(i);
       else if (i.commandName === "list") await handleList(i);
       else if (i.commandName === "contractor-ad") await handleContractorAd(i);
+      else if (i.commandName === "panel") await handlePanel(i);
       else if (i.commandName === "help") {
         await i.reply({
           embeds: [helpEmbed(isStaff(i.member, i.guild.id), verifyEnabled())],
@@ -222,11 +230,14 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isButton()) {
       if (i.customId === "ticket_buy") await openTicket(i, "buy");
       else if (i.customId === "ticket_sell") await openTicket(i, "sell");
+      else if (i.customId === "ticket_rent") await openTicket(i, "rent");
       else if (i.customId === "ticket_contractor") await openTicket(i, "contractor");
       else if (i.customId === "find_contractors") await findContractors(i);
       else if (i.customId === "ticket_close") await closeTicketInteraction(i);
       else if (i.customId === "contractor_approve") await reviewContractor(i, true);
       else if (i.customId === "contractor_deny") await reviewContractor(i, false);
+      else if (i.customId === "panel_contracts") await panelContracts(i);
+      else if (i.customId === "panel_postdesk") await panelPostDesk(i);
       else if (i.customId.startsWith("contract_sign_")) await signContract(i);
       else if (i.customId.startsWith("contract_void_")) await voidContract(i);
       else if (i.customId.startsWith("pay_cmd_")) await handlePayCmd(i);
@@ -881,6 +892,8 @@ async function openTicket(i, type) {
       ? config.buyTicketPrefix
       : type === "sell"
       ? config.sellTicketPrefix
+      : type === "rent"
+      ? config.rentTicketPrefix
       : "contractor-";
   const safeName =
     `${prefix}${i.user.username}`
@@ -998,6 +1011,48 @@ async function findContractors(i) {
       : "No contractors channel is set up yet.",
     ephemeral: true,
   });
+}
+
+// ===========================================================================
+// Staff control panel (/panel)
+// ===========================================================================
+async function handlePanel(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "This panel is for realtors and managers.", ephemeral: true });
+  }
+  const manager = isManager(i.member, i.guild.id);
+  return i.reply({
+    embeds: [staffPanelEmbed(manager)],
+    components: [staffPanelButtons(manager)],
+    ephemeral: true,
+  });
+}
+
+async function panelContracts(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Staff only.", ephemeral: true });
+  }
+  const all = store
+    .listContracts({ guild_id: i.guild.id })
+    .sort((a, b) => b.created_at - a.created_at)
+    .slice(0, 10);
+  if (!all.length) return i.reply({ content: "No contracts on file yet.", ephemeral: true });
+  const icon = (s) => (s === "signed" ? "✅" : s === "void" ? "🚫" : "🖊️");
+  const lines = all.map(
+    (c) => `${icon(c.status)} **#${c.id}** ${c.type} — ${c.parties.map((p) => p.name).join(", ")} — plot ${c.fields.plot}`
+  );
+  return i.reply({
+    content: "**Recent contracts:**\n" + lines.join("\n").slice(0, 1800) + "\n\nUse `!contract <id>` to re-pull a PDF.",
+    ephemeral: true,
+  });
+}
+
+async function panelPostDesk(i) {
+  if (!isManager(i.member, i.guild.id)) {
+    return i.reply({ content: "Only a manager can post the client panel.", ephemeral: true });
+  }
+  await i.channel.send({ embeds: [panelEmbed()], components: [panelButtons()] }).catch(() => {});
+  return i.reply({ content: "✅ Posted the client panel here.", ephemeral: true });
 }
 
 async function reviewContractor(i, approve) {

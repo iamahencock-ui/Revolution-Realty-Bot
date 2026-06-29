@@ -14,9 +14,19 @@ anti-spam.
 5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission
 6. ✅ **Listings** — category forum channels + `/list`
 7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract)
-8. ✅ **Contractors** — apply → approve → advertise *(this build)*
-9. ⏳ Panel update (Buy/Sell/Rent/Find Contractors)
+8. ✅ **Contractors** — apply → approve → advertise
+9. ✅ **Panel update + `/panel`** — Buy/Sell/Rent/Contractors + staff control panel *(this build)*
 10. ⏳ Anti-spam / automod
+
+## Panel + staff control panel (Milestone 10)
+
+The Client Desk now offers **Buy a plot · Sell a plot · Rent a plot · Become a
+Contractor · Find Contractors**. Renting opens a `rent-` ticket (handled by
+realtors) for apartments/commercial space.
+
+Realtors/managers get **`/panel`** — an ephemeral control panel listing every
+command they can run (contracts, deals, listings, lookups), with quick buttons:
+**Recent contracts**, and (managers) **Post client panel here**.
 
 ## Contractors (Milestone 9)
 

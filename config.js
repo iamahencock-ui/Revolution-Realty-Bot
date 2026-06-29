@@ -11,15 +11,19 @@ export const config = {
   // Naming for the private deal channels (prefix + the customer's name).
   buyTicketPrefix: "buy-",
   sellTicketPrefix: "sell-",
+  rentTicketPrefix: "rent-",
   renameTicketOnName: true,
 
   // The panel posted by !setup (and auto-setup).
   panelTitle: "🏠 Revolution Realty — Client Desk",
   panelDescription:
-    "Welcome to Revolution Realty. Open a private ticket below and one of our " +
-    "realtors will assist you.\n\n" +
+    "Welcome to Revolution Realty, your one-stop shop for everything property. " +
+    "Pick an option below and a realtor will assist you.\n\n" +
     "🏠 **Buy a plot** — find and purchase a property.\n" +
-    "💰 **Sell a plot** — list your property with us.",
+    "💰 **Sell a plot** — list your property with us.\n" +
+    "🔑 **Rent a plot** — rent an apartment or commercial space.\n" +
+    "🛠️ **Become a Contractor** — partner with us to offer building services.\n" +
+    "🔍 **Find Contractors** — browse our verified contractors.",
 
   // --- IGN verification -----------------------------------------------------
   // Users prove they own a Minecraft account by sending a tiny payment with a
@@ -85,4 +89,8 @@ export const config = {
     "Thanks for choosing Revolution Realty to sell your plot! A realtor will be " +
     "with you shortly. To get started, share the **plot number (/gps)**, your " +
     "asking price, and anything we should know about the property.",
+  rentWelcome:
+    "Thanks for reaching out about renting! A realtor will be with you shortly. " +
+    "Let us know what you're after — **apartment or commercial**, the area, your " +
+    "weekly budget, and how long you'd like to rent for.",
 };

@@ -30,6 +30,11 @@ export function panelButtons() {
       .setEmoji("💰")
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
+      .setCustomId("ticket_rent")
+      .setLabel("Rent a plot")
+      .setEmoji("🔑")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId("ticket_contractor")
       .setLabel("Become a Contractor")
       .setEmoji("🛠️")
@@ -79,11 +84,16 @@ export function contractorAdEmbed({ company, services, contact, image_name, by }
 
 // The welcome message inside a freshly opened ticket.
 export function ticketWelcomeEmbed(type) {
-  const isBuy = type === "buy";
+  const map = {
+    buy: { title: "🏠 Buying a plot", text: config.buyWelcome },
+    sell: { title: "💰 Selling a plot", text: config.sellWelcome },
+    rent: { title: "🔑 Renting a plot", text: config.rentWelcome },
+  };
+  const t = map[type] ?? map.buy;
   return new EmbedBuilder()
     .setColor(config.brandColor)
-    .setTitle(isBuy ? "🏠 Buying a plot" : "💰 Selling a plot")
-    .setDescription(isBuy ? config.buyWelcome : config.sellWelcome)
+    .setTitle(t.title)
+    .setDescription(t.text)
     .setFooter({ text: `${config.brandName} • a realtor will assist you here` });
 }
 
@@ -155,6 +165,7 @@ export function helpEmbed(isStaff, verifyOn) {
     e.addFields({
       name: "💼 For realtors & managers",
       value: [
+        "`/panel` — your control panel with everything you can do",
         "`/seller-agreement` — issue an exclusive listing agreement",
         "`/purchase-agreement` — issue a purchase agreement",
         "`/lease-agreement` — issue a lease / rental agreement",
@@ -167,6 +178,63 @@ export function helpEmbed(isStaff, verifyOn) {
     });
   }
   return e;
+}
+
+// --- Staff control panel (/panel) -------------------------------------------
+export function staffPanelEmbed(manager) {
+  const e = new EmbedBuilder()
+    .setColor(config.brandColor)
+    .setTitle(`💼 ${config.brandName} — ${manager ? "Manager" : "Realtor"} Panel`)
+    .setDescription("Everything you can do, in one place.")
+    .addFields(
+      {
+        name: "📄 Contracts (use in a ticket)",
+        value: [
+          "`/seller-agreement` — exclusive listing agreement",
+          "`/purchase-agreement` — purchase agreement",
+          "`/lease-agreement` — lease / rental agreement",
+        ].join("\n"),
+      },
+      {
+        name: "💸 Deals & listings",
+        value: [
+          "`/complete-deal contract:<id>` — release escrow + commission on a sale",
+          "`/list` — post a plot listing to a category forum",
+          "`!contracts` / `!contract <id>` — look up past contracts",
+        ].join("\n"),
+      }
+    );
+  if (manager) {
+    e.addFields({
+      name: "🛠️ Manager only",
+      value: [
+        "Approve/deny contractors in their application tickets",
+        "`!setup` / `!resetup` — post the client panel / re-provision",
+        "Buttons below: re-post the client panel, view recent contracts",
+      ].join("\n"),
+    });
+  }
+  return e.setFooter({ text: `${config.brandName}` });
+}
+
+export function staffPanelButtons(manager) {
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("panel_contracts")
+      .setLabel("Recent contracts")
+      .setEmoji("📋")
+      .setStyle(ButtonStyle.Secondary)
+  );
+  if (manager) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId("panel_postdesk")
+        .setLabel("Post client panel here")
+        .setEmoji("📢")
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+  return row;
 }
 
 // --- Listings ---------------------------------------------------------------
