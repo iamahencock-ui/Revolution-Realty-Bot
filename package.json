@@ -1,0 +1,19 @@
+{
+  "name": "revolution-realty-bot",
+  "version": "0.1.0",
+  "description": "Revolution Realty — a Discord bot for a DemocracyCraft real-estate firm: buy/sell tickets, signable contracts with PDF records, a contract archive, commission tracking, and anti-spam.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "pdfkit": "^0.15.0"
+  }
+}
