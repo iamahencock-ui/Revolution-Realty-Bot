@@ -52,6 +52,14 @@ export async function ensureGuildSetup(guild, client) {
         reason: "Revolution Realty setup",
       })
     );
+    cfg.contractorRoleId = await mk(() =>
+      guild.roles.create({
+        name: "Contractor",
+        color: 0xdd6b20,
+        hoist: true,
+        reason: "Revolution Realty setup",
+      })
+    );
     if (gated) {
       cfg.verifiedRoleId = await mk(() =>
         guild.roles.create({
@@ -81,6 +89,21 @@ export async function ensureGuildSetup(guild, client) {
         name: "contract-archive",
         type: ChannelType.GuildText,
         permissionOverwrites: staffView,
+      })
+    );
+
+    // Contractors advertising channel: everyone can browse, only the bot/staff
+    // post (approved contractors advertise via /contractor-ad).
+    cfg.contractorsChannelId = await mk(() =>
+      guild.channels.create({
+        name: "contractors",
+        type: ChannelType.GuildText,
+        topic: config.contractor.channelTopic,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, allow: [V, R], deny: [S] },
+          { id: client.user.id, allow: [V, S, R] },
+          ...(cfg.managerRoleId ? [{ id: cfg.managerRoleId, allow: [V, S, R] }] : []),
+        ],
       })
     );
 
@@ -226,9 +249,11 @@ async function notifyOwner(guild, cfg) {
         "Created the essentials:",
         line("Manager role", cfg.managerRoleId),
         line("Realtor role", cfg.realtorRoleId),
+        line("Contractor role", cfg.contractorRoleId),
         ...(cfg.verifiedRoleId ? [line("Verified role", cfg.verifiedRoleId)] : []),
         line("Client desk (panel)", cfg.deskChannelId, "ch"),
         ...(cfg.verifyChannelId ? [line("Verify channel", cfg.verifyChannelId, "ch")] : []),
+        line("Contractors", cfg.contractorsChannelId, "ch"),
         line("Contract archive", cfg.contractArchiveChannelId, "ch"),
         `• Listing forums: ${
           Object.keys(cfg.listingForums || {}).length

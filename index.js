@@ -27,6 +27,9 @@ import {
   helpEmbed,
   paymentPanelEmbed,
   paymentPanelButtons,
+  contractorWelcomeEmbed,
+  contractorReviewButtons,
+  contractorAdEmbed,
 } from "./embeds.js";
 import {
   contractEmbed,
@@ -66,6 +69,8 @@ const ENV_FALLBACK = {
   ticketCategoryId: process.env.TICKET_CATEGORY_ID,
   contractArchiveChannelId: process.env.CONTRACT_ARCHIVE_CHANNEL_ID,
   verifiedRoleId: process.env.VERIFIED_ROLE_ID,
+  contractorRoleId: process.env.CONTRACTOR_ROLE_ID,
+  contractorsChannelId: process.env.CONTRACTORS_CHANNEL_ID,
 };
 function gcfg(guildId, key) {
   const gc = store.getGuildConfig(guildId);
@@ -82,6 +87,14 @@ function isStaff(member, guildId) {
     (realtor && member.roles.cache.has(realtor)) ||
     (manager && member.roles.cache.has(manager))
   );
+}
+
+// Manager-only (contractor approvals, etc.).
+function isManager(member, guildId) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionFlagsBits.ManageGuild)) return true;
+  const manager = gcfg(guildId, "managerRoleId");
+  return manager && member.roles.cache.has(manager);
 }
 
 // --- Slash commands for issuing contracts ----------------------------------
@@ -142,6 +155,14 @@ const listCmd = new SlashCommandBuilder()
   .addStringOption((o) => o.setName("description").setDescription("Details, features, location").setRequired(false))
   .addAttachmentOption((o) => o.setName("image").setDescription("A picture of the plot").setRequired(false));
 
+const contractorAdCmd = new SlashCommandBuilder()
+  .setName("contractor-ad")
+  .setDescription("Post your company advert to the contractors channel (approved contractors)")
+  .addStringOption((o) => o.setName("company").setDescription("Your company name").setRequired(true))
+  .addStringOption((o) => o.setName("services").setDescription("Services you offer").setRequired(true))
+  .addStringOption((o) => o.setName("contact").setDescription("How to reach you (IGN / Discord)").setRequired(false))
+  .addAttachmentOption((o) => o.setName("image").setDescription("A logo or showcase image").setRequired(false));
+
 const helpCmd = new SlashCommandBuilder()
   .setName("help")
   .setDescription("How to use the Revolution Realty bot");
@@ -152,6 +173,7 @@ const SLASH_COMMANDS = [
   leaseCmd.toJSON(),
   completeDealCmd.toJSON(),
   listCmd.toJSON(),
+  contractorAdCmd.toJSON(),
   helpCmd.toJSON(),
 ];
 
@@ -188,6 +210,7 @@ client.on(Events.InteractionCreate, async (i) => {
       else if (i.commandName === "lease-agreement") await issueContract(i, "lease");
       else if (i.commandName === "complete-deal") await completeDeal(i);
       else if (i.commandName === "list") await handleList(i);
+      else if (i.commandName === "contractor-ad") await handleContractorAd(i);
       else if (i.commandName === "help") {
         await i.reply({
           embeds: [helpEmbed(isStaff(i.member, i.guild.id), verifyEnabled())],
@@ -199,7 +222,11 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isButton()) {
       if (i.customId === "ticket_buy") await openTicket(i, "buy");
       else if (i.customId === "ticket_sell") await openTicket(i, "sell");
+      else if (i.customId === "ticket_contractor") await openTicket(i, "contractor");
+      else if (i.customId === "find_contractors") await findContractors(i);
       else if (i.customId === "ticket_close") await closeTicketInteraction(i);
+      else if (i.customId === "contractor_approve") await reviewContractor(i, true);
+      else if (i.customId === "contractor_deny") await reviewContractor(i, false);
       else if (i.customId.startsWith("contract_sign_")) await signContract(i);
       else if (i.customId.startsWith("contract_void_")) await voidContract(i);
       else if (i.customId.startsWith("pay_cmd_")) await handlePayCmd(i);
@@ -849,7 +876,12 @@ async function openTicket(i, type) {
   }
 
   const guild = i.guild;
-  const prefix = type === "buy" ? config.buyTicketPrefix : config.sellTicketPrefix;
+  const prefix =
+    type === "buy"
+      ? config.buyTicketPrefix
+      : type === "sell"
+      ? config.sellTicketPrefix
+      : "contractor-";
   const safeName =
     `${prefix}${i.user.username}`
       .toLowerCase()
@@ -859,6 +891,11 @@ async function openTicket(i, type) {
   const realtorRoleId = gcfg(guild.id, "realtorRoleId");
   const managerRoleId = gcfg(guild.id, "managerRoleId");
   const categoryId = gcfg(guild.id, "ticketCategoryId");
+  // Contractor applications are handled by managers only (realtors stay out).
+  const staffRoleIds =
+    type === "contractor"
+      ? [managerRoleId].filter(Boolean)
+      : [realtorRoleId, managerRoleId].filter(Boolean);
 
   const overwrites = [
     { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -880,16 +917,14 @@ async function openTicket(i, type) {
         PermissionFlagsBits.ReadMessageHistory,
       ],
     },
-    ...[realtorRoleId, managerRoleId]
-      .filter(Boolean)
-      .map((id) => ({
-        id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-        ],
-      })),
+    ...staffRoleIds.map((id) => ({
+      id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    })),
   ];
 
   let channel;
@@ -913,17 +948,19 @@ async function openTicket(i, type) {
 
   store.createTicket(channel.id, i.user.id, type, Date.now());
 
-  const ping = [i.user.id]
-    .map((id) => `<@${id}>`)
-    .concat(realtorRoleId ? [`<@&${realtorRoleId}>`] : [])
-    .join(" ");
+  // Contractor applications ping a manager and show a review (approve/deny) panel.
+  const pingRoleId = type === "contractor" ? managerRoleId : realtorRoleId;
+  const ping = `<@${i.user.id}>` + (pingRoleId ? ` <@&${pingRoleId}>` : "");
   await channel.send({
     content: ping,
-    embeds: [ticketWelcomeEmbed(type)],
-    components: [closeButton()],
+    embeds: [type === "contractor" ? contractorWelcomeEmbed() : ticketWelcomeEmbed(type)],
+    components:
+      type === "contractor"
+        ? [contractorReviewButtons(), closeButton()]
+        : [closeButton()],
     allowedMentions: {
       users: [i.user.id],
-      roles: realtorRoleId ? [realtorRoleId] : [],
+      roles: pingRoleId ? [pingRoleId] : [],
     },
   });
 
@@ -948,6 +985,89 @@ async function closeTicketInteraction(i) {
   store.closeTicket(i.channel.id);
   await i.reply({ content: "🔒 Closing this ticket in 5 seconds…" });
   setTimeout(() => i.channel.delete().catch(() => {}), 5000);
+}
+
+// ===========================================================================
+// Contractors
+// ===========================================================================
+async function findContractors(i) {
+  const ch = gcfg(i.guild.id, "contractorsChannelId");
+  return i.reply({
+    content: ch
+      ? `🔍 Browse our verified contractors here: <#${ch}>`
+      : "No contractors channel is set up yet.",
+    ephemeral: true,
+  });
+}
+
+async function reviewContractor(i, approve) {
+  if (!isManager(i.member, i.guild.id)) {
+    return i.reply({ content: "Only a manager can review contractor applications.", ephemeral: true });
+  }
+  const ticket = store.getTicket(i.channel.id);
+  if (!ticket || ticket.type !== "contractor") {
+    return i.reply({ content: "This isn't a contractor application.", ephemeral: true });
+  }
+  const applicantId = ticket.user_id;
+
+  if (approve) {
+    const roleId = gcfg(i.guild.id, "contractorRoleId");
+    const member = await i.guild.members.fetch(applicantId).catch(() => null);
+    if (roleId && member) await member.roles.add(roleId).catch(() => {});
+    await i.update({ components: [closeButton()] });
+    const adChannel = gcfg(i.guild.id, "contractorsChannelId");
+    await i.channel
+      .send(
+        `✅ <@${applicantId}> has been **approved** as a contractor! ` +
+          `You can now advertise your company with \`/contractor-ad\`${adChannel ? ` in <#${adChannel}>` : ""}.`
+      )
+      .catch(() => {});
+  } else {
+    await i.update({ components: [closeButton()] });
+    await i.channel
+      .send(`❌ <@${applicantId}>'s contractor application was **denied**. Reach out if you'd like to reapply with more detail.`)
+      .catch(() => {});
+  }
+}
+
+async function handleContractorAd(i) {
+  const roleId = gcfg(i.guild.id, "contractorRoleId");
+  const isContractor = roleId && i.member.roles.cache.has(roleId);
+  if (!isContractor && !isManager(i.member, i.guild.id)) {
+    return i.reply({
+      content: "Only approved contractors can post adverts. Use **Become a Contractor** on the Client Desk to apply.",
+      ephemeral: true,
+    });
+  }
+  const chId = gcfg(i.guild.id, "contractorsChannelId");
+  const ch = chId ? await client.channels.fetch(chId).catch(() => null) : null;
+  if (!ch) return i.reply({ content: "No contractors channel is set up.", ephemeral: true });
+
+  await i.deferReply({ ephemeral: true });
+
+  const att = i.options.getAttachment("image");
+  const files = [];
+  let imageName = null;
+  if (att) {
+    try {
+      const res = await fetch(att.url);
+      const buf = Buffer.from(await res.arrayBuffer());
+      imageName = (att.name || "ad.png").replace(/[^\w.\-]/g, "_");
+      files.push(new AttachmentBuilder(buf, { name: imageName }));
+    } catch {
+      imageName = null;
+    }
+  }
+
+  const embed = contractorAdEmbed({
+    company: i.options.getString("company"),
+    services: i.options.getString("services"),
+    contact: i.options.getString("contact"),
+    image_name: imageName,
+    by: displayName(i.member, i.user),
+  });
+  await ch.send({ embeds: [embed], files }).catch(() => {});
+  return i.editReply(`✅ Your advert is posted in <#${ch.id}>.`);
 }
 
 // ===========================================================================

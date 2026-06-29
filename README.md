@@ -13,10 +13,23 @@ anti-spam.
 4. ✅ **Contract archive / lookup** — search past contracts, re-pull PDFs
 5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission
 6. ✅ **Listings** — category forum channels + `/list`
-7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract) *(this build)*
-8. ⏳ Contractor application + advertising
+7. ✅ **Lease Agreement** — `/lease-agreement` (rental contract)
+8. ✅ **Contractors** — apply → approve → advertise *(this build)*
 9. ⏳ Panel update (Buy/Sell/Rent/Find Contractors)
 10. ⏳ Anti-spam / automod
+
+## Contractors (Milestone 9)
+
+Setup creates a **Contractor** role and a public, read-only **#contractors**
+channel. The Client Desk panel gains two buttons:
+
+- **🛠️ Become a Contractor** — opens a private application ticket (handled by
+  **managers**, not realtors). A manager clicks **Approve**/**Deny**; approval
+  grants the **Contractor** role.
+- **🔍 Find Contractors** — points users to the #contractors channel.
+
+Approved contractors advertise with **`/contractor-ad`** (company, services,
+contact, optional image) → the bot posts a formatted advert into #contractors.
 
 ## Lease Agreement (Milestone 7)
 

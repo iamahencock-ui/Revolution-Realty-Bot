@@ -49,6 +49,15 @@ export const config = {
     depositDefault: "None.",
   },
 
+  // --- Contractors ----------------------------------------------------------
+  contractor: {
+    applyWelcome:
+      "Thanks for your interest in partnering with **Revolution Realty**! " +
+      "Tell us about your company — your services, examples of past work, and " +
+      "your in-game name. A **manager** will review and approve you below.",
+    channelTopic: "Partnered & verified contractors — find help to build or modify your plot.",
+  },
+
   // --- Listings -------------------------------------------------------------
   // Forum channels created per category. Realtors post listings with /list.
   listingCategories: ["Residential", "Commercial", "Skyscraper", "Industrial"],

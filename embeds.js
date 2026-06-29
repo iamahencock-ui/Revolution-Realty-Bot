@@ -28,8 +28,53 @@ export function panelButtons() {
       .setCustomId("ticket_sell")
       .setLabel("Sell a plot")
       .setEmoji("💰")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("ticket_contractor")
+      .setLabel("Become a Contractor")
+      .setEmoji("🛠️")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("find_contractors")
+      .setLabel("Find Contractors")
+      .setEmoji("🔍")
+      .setStyle(ButtonStyle.Secondary)
   );
+}
+
+// --- Contractors ------------------------------------------------------------
+export function contractorWelcomeEmbed() {
+  return new EmbedBuilder()
+    .setColor(0xdd6b20)
+    .setTitle("🛠️ Contractor application")
+    .setDescription(config.contractor.applyWelcome)
+    .setFooter({ text: `${config.brandName} • a manager will review your application` });
+}
+
+export function contractorReviewButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("contractor_approve")
+      .setLabel("Approve")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("contractor_deny")
+      .setLabel("Deny")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger)
+  );
+}
+
+export function contractorAdEmbed({ company, services, contact, image_name, by }) {
+  const e = new EmbedBuilder()
+    .setColor(0xdd6b20)
+    .setTitle(`🛠️ ${company}`)
+    .setDescription(services)
+    .setFooter({ text: `${config.brandName} • verified contractor • posted by ${by}` });
+  if (contact) e.addFields({ name: "Contact", value: contact });
+  if (image_name) e.setImage(`attachment://${image_name}`);
+  return e;
 }
 
 // The welcome message inside a freshly opened ticket.
@@ -99,6 +144,7 @@ export function helpEmbed(isStaff, verifyOn) {
     "• Open a ticket from the **Client Desk** — **Buy a plot** or **Sell a plot** — and a realtor will assist you.",
     "• Browse current listings in the **Residential / Commercial / Skyscraper / Industrial** forums.",
     "• After a contract is signed, use the **payment panel** in your ticket: **Get pay command** → pay in-game → **Check payment**.",
+    "• Need a builder? **Find Contractors** on the Client Desk. Run a building company? **Become a Contractor** → once approved, post ads with `/contractor-ad`.",
   ];
   if (verifyOn) {
     client.push("• Verify your Minecraft account in the **verify** channel to unlock the Client Desk.");
