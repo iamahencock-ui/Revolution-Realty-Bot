@@ -12,6 +12,7 @@ import {
   ChannelType,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  AttachmentBuilder,
 } from "discord.js";
 import { config } from "./config.js";
 import * as store from "./db.js";
@@ -22,6 +23,7 @@ import {
   ticketWelcomeEmbed,
   closeButton,
   verifyConfirmButton,
+  listingEmbed,
 } from "./embeds.js";
 import {
   contractEmbed,
@@ -107,10 +109,28 @@ const completeDealCmd = new SlashCommandBuilder()
   .setDescription("Confirm a plot transfer and release escrow + commission")
   .addIntegerOption((o) => o.setName("contract").setDescription("Contract # to complete").setRequired(true));
 
+const listCmd = new SlashCommandBuilder()
+  .setName("list")
+  .setDescription("Post a plot listing to the category forum")
+  .addStringOption((o) =>
+    o.setName("category").setDescription("Listing category").setRequired(true)
+      .addChoices(...config.listingCategories.map((c) => ({ name: c, value: c })))
+  )
+  .addStringOption((o) =>
+    o.setName("type").setDescription("Sale or rent").setRequired(true)
+      .addChoices({ name: "Sale", value: "Sale" }, { name: "Rent", value: "Rent" })
+  )
+  .addStringOption((o) => o.setName("plot").setDescription("Plot number / /gps").setRequired(true))
+  .addStringOption((o) => o.setName("price").setDescription("Price (e.g. 50000, or 500/week)").setRequired(true))
+  .addStringOption((o) => o.setName("title").setDescription("Short listing title").setRequired(true))
+  .addStringOption((o) => o.setName("description").setDescription("Details, features, location").setRequired(false))
+  .addAttachmentOption((o) => o.setName("image").setDescription("A picture of the plot").setRequired(false));
+
 const SLASH_COMMANDS = [
   sellerCmd.toJSON(),
   purchaseCmd.toJSON(),
   completeDealCmd.toJSON(),
+  listCmd.toJSON(),
 ];
 
 async function registerCommands(guild) {
@@ -141,6 +161,7 @@ client.on(Events.InteractionCreate, async (i) => {
       if (i.commandName === "seller-agreement") return issueContract(i, "seller");
       if (i.commandName === "purchase-agreement") return issueContract(i, "purchase");
       if (i.commandName === "complete-deal") return completeDeal(i);
+      if (i.commandName === "list") return handleList(i);
       return;
     }
     if (i.isButton()) {
@@ -451,6 +472,86 @@ async function completeDeal(i) {
     `\n• Company keeps: ${money(companyCut)} (stays in firm account)` +
     (c.completed ? `\n✅ **Deal #${id} complete.**` : "\n⚠️ Some payouts pending — re-run to retry.");
   return i.editReply(payoutSummary(id, price, results) + tail);
+}
+
+// ===========================================================================
+// Listings
+// ===========================================================================
+async function handleList(i) {
+  if (!isStaff(i.member, i.guild.id)) {
+    return i.reply({ content: "Only realtors or managers can post listings.", ephemeral: true });
+  }
+  const forums = gcfg(i.guild.id, "listingForums");
+  const category = i.options.getString("category");
+  const forum = forums?.[category];
+  if (!forum) {
+    return i.reply({
+      content: `No listing channel for **${category}** — run \`!resetup\` to create the listing forums.`,
+      ephemeral: true,
+    });
+  }
+
+  await i.deferReply({ ephemeral: true });
+
+  const type = i.options.getString("type"); // "Sale" | "Rent"
+  const att = i.options.getAttachment("image");
+
+  // Re-upload the image so it stays on the post permanently.
+  const files = [];
+  let imageName = null;
+  if (att) {
+    try {
+      const res = await fetch(att.url);
+      const buf = Buffer.from(await res.arrayBuffer());
+      imageName = (att.name || "listing.png").replace(/[^\w.\-]/g, "_");
+      files.push(new AttachmentBuilder(buf, { name: imageName }));
+    } catch {
+      imageName = null;
+    }
+  }
+
+  const listing = store.createListing({
+    guild_id: i.guild.id,
+    category,
+    type,
+    plot: i.options.getString("plot"),
+    price: i.options.getString("price"),
+    title: i.options.getString("title"),
+    description: i.options.getString("description") ?? "—",
+    image_name: imageName,
+    realtor: displayName(i.member, i.user),
+    realtor_id: i.user.id,
+    status: "active",
+    created_at: Date.now(),
+  });
+
+  const embed = listingEmbed(listing);
+
+  let link;
+  try {
+    const ch = await client.channels.fetch(forum.channelId);
+    if (forum.kind === "forum") {
+      const tagId = forum.tags?.[type];
+      const thread = await ch.threads.create({
+        name: `${listing.title} — ${listing.price}`.slice(0, 95),
+        message: { embeds: [embed], files },
+        appliedTags: tagId ? [tagId] : [],
+      });
+      listing.thread_id = thread.id;
+      link = `<#${thread.id}>`;
+    } else {
+      const msg = await ch.send({ embeds: [embed], files });
+      listing.message_id = msg.id;
+      listing.channel_id = ch.id;
+      link = `${ch} (listing posted)`;
+    }
+    store.saveListings();
+  } catch (err) {
+    console.error("listing post failed:", err);
+    return i.editReply(`Couldn't post the listing: \`${err.message}\``);
+  }
+
+  return i.editReply(`✅ Listing **#${listing.id}** posted to ${link}.`);
 }
 
 function payoutSummary(id, price, results) {
@@ -801,6 +902,7 @@ async function handleHelp(msg) {
       "`/purchase-agreement` — purchase agreement (buyer + seller + realtor sign)",
       "Parties click **Sign**; once all have signed, a PDF record is posted and archived.",
       "`/complete-deal contract:<id>` — after the buyer pays the firm, confirm transfer and auto-release seller proceeds + commission",
+      "`/list` — post a plot listing (category, sale/rent, plot, price, image) to the category forum",
       "",
       "**Look up past contracts:**",
       `\`${config.prefix}contracts\` — recent contracts (add \`@user\`, a status \`pending/signed/void\`, or a plot/name to filter)`,

@@ -137,6 +137,42 @@ export async function ensureGuildSetup(guild, client) {
           .catch(() => {});
       cfg.deskChannelId = deskId;
     }
+
+    // Listings: a category with a forum channel per listing category.
+    const listCatId = await mk(() =>
+      guild.channels.create({ name: "Listings", type: ChannelType.GuildCategory })
+    );
+    cfg.listingsCategoryId = listCatId;
+    cfg.listingForums = {};
+    for (const cat of config.listingCategories) {
+      let channelId = null;
+      let kind = "forum";
+      const tags = {};
+      try {
+        const f = await guild.channels.create({
+          name: cat.toLowerCase(),
+          type: ChannelType.GuildForum,
+          parent: listCatId || null,
+          topic: `${cat} plot listings — posted by Revolution Realty`,
+          availableTags: config.listingTags.map((t) => ({ name: t })),
+        });
+        channelId = f.id;
+        for (const t of f.availableTags) tags[t.name] = t.id;
+      } catch (err) {
+        // Forum channels may be unavailable; fall back to a text channel.
+        console.warn(`setup: forum for ${cat} failed (${err.message}); using text.`);
+        channelId = await mk(() =>
+          guild.channels.create({
+            name: cat.toLowerCase(),
+            type: ChannelType.GuildText,
+            parent: listCatId || null,
+            topic: `${cat} plot listings`,
+          })
+        );
+        kind = "text";
+      }
+      if (channelId) cfg.listingForums[cat] = { channelId, kind, tags };
+    }
   }
 
   cfg.configured = true;
@@ -178,6 +214,13 @@ async function notifyOwner(guild, cfg) {
         line("Client desk (panel)", cfg.deskChannelId, "ch"),
         ...(cfg.verifyChannelId ? [line("Verify channel", cfg.verifyChannelId, "ch")] : []),
         line("Contract archive", cfg.contractArchiveChannelId, "ch"),
+        `• Listing forums: ${
+          Object.keys(cfg.listingForums || {}).length
+            ? Object.values(cfg.listingForums)
+                .map((f) => `<#${f.channelId}>`)
+                .join(" ")
+            : "⚠️ not created"
+        }`,
         "",
         cfg.verifyChannelId
           ? "**Verification is ON** — clients must verify their IGN before the Client Desk unlocks."

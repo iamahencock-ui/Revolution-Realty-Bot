@@ -52,6 +52,25 @@ export function closeButton() {
   );
 }
 
+// --- Listings ---------------------------------------------------------------
+export function listingEmbed(listing) {
+  const e = new EmbedBuilder()
+    .setColor(listing.type === "Rent" ? 0x38a169 : config.brandColor)
+    .setTitle(`${listing.type === "Rent" ? "🔑" : "🏷️"} ${listing.title}`)
+    .addFields(
+      { name: "Category", value: listing.category, inline: true },
+      { name: "Type", value: `For ${listing.type}`, inline: true },
+      { name: "Plot", value: listing.plot, inline: true },
+      { name: "Price", value: listing.price, inline: true }
+    )
+    .setFooter({ text: `${config.brandName} • Listing #${listing.id} • posted by ${listing.realtor}` });
+  if (listing.description && listing.description !== "—") {
+    e.setDescription(listing.description);
+  }
+  if (listing.image_name) e.setImage(`attachment://${listing.image_name}`);
+  return e;
+}
+
 // --- IGN verification panel -------------------------------------------------
 export function verifyPanelEmbed() {
   return new EmbedBuilder()

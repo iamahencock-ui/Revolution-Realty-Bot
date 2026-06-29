@@ -11,8 +11,25 @@ anti-spam.
 2. ✅ **Contracts** — Seller's & Purchase agreements, click-to-sign, PDF export
 3. ✅ **IGN verification** — micropayment + memo proof, gates the Client Desk
 4. ✅ **Contract archive / lookup** — search past contracts, re-pull PDFs
-5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission *(this build)*
-6. ⏳ Anti-spam / automod
+5. ✅ **Escrow / autopay** — verify buyer payment, auto-pay seller + commission
+6. ✅ **Listings** — category forum channels + `/list` *(this build)*
+7. ⏳ Lease Agreement contract type
+8. ⏳ Contractor application + advertising
+9. ⏳ Panel update (Buy/Sell/Rent/Find Contractors)
+10. ⏳ Anti-spam / automod
+
+## Listings (Milestone 6)
+
+First-run setup creates a **Listings** category with a **forum channel per
+category** (Residential, Commercial, Skyscraper, Industrial), each with **Sale /
+Rent / Sold** tags. (If forum channels aren't available on the server, it falls
+back to text channels automatically.)
+
+A realtor posts a listing with **`/list`** (intended for use inside a sell
+ticket): pick category + Sale/Rent, enter plot, price, title, description, and
+an optional image. The bot creates a **forum post** in the right category with
+the Sale/Rent tag and the image, so users can browse and filter all listings in
+one place. Listings are stored for later management (mark-sold coming next).
 
 ## Escrow / autopay (Milestone 5)
 

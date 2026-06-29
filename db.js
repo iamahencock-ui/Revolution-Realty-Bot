@@ -18,6 +18,8 @@ let data = {
   nextContractId: 1,
   pendingVerify: {},
   verified: {},
+  listings: [],
+  nextListingId: 1,
 };
 if (existsSync(FILE)) {
   try {
@@ -27,8 +29,11 @@ if (existsSync(FILE)) {
     data.contracts ??= [];
     data.pendingVerify ??= {};
     data.verified ??= {};
+    data.listings ??= [];
     data.nextContractId ??=
       (data.contracts.reduce((m, c) => Math.max(m, c.id), 0) || 0) + 1;
+    data.nextListingId ??=
+      (data.listings.reduce((m, l) => Math.max(m, l.id), 0) || 0) + 1;
   } catch {
     console.error("data.json was corrupt; starting fresh.");
   }
@@ -101,6 +106,25 @@ export function saveContract() {
 export function listContracts(filter = {}) {
   return data.contracts.filter((c) =>
     Object.entries(filter).every(([k, v]) => c[k] === v)
+  );
+}
+
+// --- Listings --------------------------------------------------------------
+export function createListing(obj) {
+  const listing = { id: data.nextListingId++, ...obj };
+  data.listings.push(listing);
+  save();
+  return listing;
+}
+export function getListing(id) {
+  return data.listings.find((l) => l.id === id) ?? null;
+}
+export function saveListings() {
+  save();
+}
+export function listListings(filter = {}) {
+  return data.listings.filter((l) =>
+    Object.entries(filter).every(([k, v]) => l[k] === v)
   );
 }
 

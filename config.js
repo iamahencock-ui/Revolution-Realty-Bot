@@ -47,6 +47,11 @@ export const config = {
     specialDefault: "None.",
   },
 
+  // --- Listings -------------------------------------------------------------
+  // Forum channels created per category. Realtors post listings with /list.
+  listingCategories: ["Residential", "Commercial", "Skyscraper", "Industrial"],
+  listingTags: ["Sale", "Rent", "Sold"],
+
   // --- Escrow / autopay -----------------------------------------------------
   // After a purchase agreement is signed, the buyer pays the firm the full
   // price (memo-matched). On /complete-deal, the firm pays the seller
